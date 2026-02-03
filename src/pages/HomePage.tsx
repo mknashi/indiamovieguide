@@ -181,7 +181,9 @@ export function HomePage({ lang }: { lang?: string }) {
       ) : (
         <div className="grid">
           {newSorted.slice(0, 12).map((m) => (
-            <MovieCard key={m.id} movie={m} />
+            <div key={m.id}>
+              <MovieCard movie={m} />
+            </div>
           ))}
         </div>
       )}
@@ -192,7 +194,9 @@ export function HomePage({ lang }: { lang?: string }) {
       </div>
       <div className="grid">
         {upcomingSorted.slice(0, 12).map((m) => (
-          <MovieCard key={m.id} movie={m} />
+          <div key={m.id}>
+            <MovieCard movie={m} />
+          </div>
         ))}
       </div>
 
@@ -251,7 +255,9 @@ export function HomePage({ lang }: { lang?: string }) {
           </div>
           <div className="grid">
             {browseSorted.slice(0, 24).map((m) => (
-              <MovieCard key={m.id} movie={m} />
+              <div key={m.id}>
+                <MovieCard movie={m} />
+              </div>
             ))}
           </div>
         </>

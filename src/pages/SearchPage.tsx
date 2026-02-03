@@ -84,7 +84,9 @@ export function SearchPage({ q }: { q: string }) {
       ) : sorted.length ? (
         <div className="grid">
           {sorted.map((m) => (
-            <MovieCard key={m.id} movie={m} />
+            <div key={m.id}>
+              <MovieCard movie={m} />
+            </div>
           ))}
         </div>
       ) : (
@@ -93,4 +95,3 @@ export function SearchPage({ q }: { q: string }) {
     </div>
   );
 }
-

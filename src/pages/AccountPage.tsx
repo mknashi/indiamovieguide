@@ -169,7 +169,9 @@ export function AccountPage() {
           {favorites.length ? (
             <div className="grid">
               {favorites.map((m) => (
-                <MovieCard key={m.id} movie={m} />
+                <div key={m.id}>
+                  <MovieCard movie={m} />
+                </div>
               ))}
             </div>
           ) : (
@@ -186,7 +188,9 @@ export function AccountPage() {
           {watchlist.length ? (
             <div className="grid">
               {watchlist.map((m) => (
-                <MovieCard key={m.id} movie={m} />
+                <div key={m.id}>
+                  <MovieCard movie={m} />
+                </div>
               ))}
             </div>
           ) : (
