@@ -295,6 +295,8 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 	      const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
 	      const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
 	      if (debugSongs) slog('song refresh', { movieTitle: full.title, language: full.language, year, ytMode });
+	      const ytQuotaUntil = metaGetNumber('youtube_quota_until');
+	      const ytBlocked = ytQuotaUntil && Date.now() < ytQuotaUntil;
 
 	      // Do not overwrite admin-curated songs unless explicitly allowed.
 	      if (forceSongs && adminSongCount > 0 && opts?.overrideAdminSongs !== true) {
@@ -371,6 +373,34 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 	          if (debugSongs) slog('itunes committed', { movieId });
 	          return;
 	        }
+
+	        // If YouTube is currently blocked due to quota, still store the definitive tracklist
+	        // without links so the UI can show song names (and offer a manual YouTube search per song).
+	        if (ytBlocked) {
+	          replaceSongsForMovie(db, movieId, songs, {
+	            source: 'itunes',
+	            platform: 'YouTube',
+	            sourceUrl: itunes.albumUrl || '',
+	            attributionProvider: 'itunes'
+	          });
+
+	          if (itunes.albumUrl) {
+	            db.prepare(
+	              'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+	            ).run(
+	              hashId('attr', `${movieId}:itunes`),
+	              'movie',
+	              movieId,
+	              'itunes',
+	              String(itunes.albumId || ''),
+	              itunes.albumUrl,
+	              nowIso()
+	            );
+	          }
+
+	          if (debugSongs) slog('itunes committed (no youtube links; quota blocked)', { movieId });
+	          return;
+	        }
 	      }
 	      const wikiOverride = opts?.wikiTitleOverride ? String(opts.wikiTitleOverride).trim() : '';
 	      const wikiFromOverride = wikiOverride
@@ -436,6 +466,18 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
           }
           if (debugSongs) slog('wikipedia committed', { movieId });
         } else {
+          if (ytBlocked) {
+            // Quota is blocked; still store the soundtrack list without links so users see something useful.
+            replaceSongsForMovie(db, movieId, songs, { source: 'wikipedia', platform: 'YouTube', wikiUrl: wiki.url || '' });
+            if (wiki.url) {
+              db.prepare(
+                'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+              ).run(hashId('attr', `${movieId}:wikipedia`), 'movie', movieId, 'wikipedia', wiki.title || '', wiki.url, nowIso());
+            }
+            if (debugSongs) slog('wikipedia committed (no youtube links; quota blocked)', { movieId });
+            return;
+          }
+
           const hints = hintTokensFromNames((full.cast || []).slice(0, 8).map((c) => c?.name).filter(Boolean));
           const ytSongs = await youtubeSearchSongsForMovie({
             title: full.title,
@@ -444,7 +486,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
             hints
           }).catch(() => []);
           if (debugSongs) slog('fallback to youtubeSearchSongsForMovie', { count: ytSongs.length });
-          replaceSongsFromYoutube(db, movieId, ytSongs);
+          if (ytSongs.length) replaceSongsFromYoutube(db, movieId, ytSongs);
         }
 
       } else {
@@ -458,7 +500,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
           hints
         }).catch(() => []);
         if (debugSongs) slog('youtubeSearchSongsForMovie', { count: songs.length });
-        replaceSongsFromYoutube(db, movieId, songs);
+        if (songs.length) replaceSongsFromYoutube(db, movieId, songs);
       }
     }
 
