@@ -158,17 +158,34 @@ async function seedLanguageIfSparse(langName) {
   const code = LANG_TO_TMDB[langName];
   if (!code) return;
 
-  const have = db
-    .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
-    .get(langName)?.c;
-  if (typeof have === 'number' && have >= 30) return;
+  const haveTotal =
+    db
+      .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
+      .get(langName)?.c || 0;
+  // Don't only look at total rows: you can have a large catalog of older titles but still
+  // have 0 upcoming movies for that language.
+  const today = new Date().toISOString().slice(0, 10);
+  const haveUpcoming =
+    db
+      .prepare(
+        `
+        SELECT COUNT(*) as c
+        FROM movies
+        WHERE lower(language) = lower(?)
+          AND COALESCE(is_indian, 1) = 1
+          AND release_date > ?
+      `
+      )
+      .get(langName, today)?.c || 0;
+
+  // If we already have a decent number of titles and at least some upcoming, skip.
+  // Otherwise, refresh this language in the background.
+  if (haveTotal >= 30 && haveUpcoming >= 6) return;
 
   const langKey = `last_lang_seed_at:${String(langName || '').toLowerCase()}`;
   const langTtlMs = 12 * 60 * 60 * 1000;
   const lastLangSeedAt = metaGetNumber(langKey);
   if (lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
-
-  const today = new Date().toISOString().slice(0, 10);
   const past365 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const future365 = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
