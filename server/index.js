@@ -98,6 +98,33 @@ loadEnvFileIfPresent('.env');
 const db = openDb();
 migrate(db);
 
+function metaGet(key) {
+  try {
+    const row = db.prepare('SELECT value, updated_at FROM app_meta WHERE key = ?').get(String(key));
+    return row ? { value: String(row.value || ''), updatedAt: String(row.updated_at || '') } : null;
+  } catch {
+    return null;
+  }
+}
+
+function metaGetNumber(key) {
+  const row = metaGet(key);
+  const n = row ? Number(row.value) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+function metaSet(key, value) {
+  try {
+    db.prepare('INSERT OR REPLACE INTO app_meta(key, value, updated_at) VALUES (?, ?, ?)').run(
+      String(key),
+      String(value),
+      nowIso()
+    );
+  } catch {
+    // ignore
+  }
+}
+
 // --- Static frontend (production) ---
 // In production (e.g. Render), serve the built Vite app from `dist/` so you only
 // run a single Node process. In dev, use `npm run dev` (Vite) + `npm run server:dev`.
@@ -136,6 +163,11 @@ async function seedLanguageIfSparse(langName) {
     .get(langName)?.c;
   if (typeof have === 'number' && have >= 30) return;
 
+  const langKey = `last_lang_seed_at:${String(langName || '').toLowerCase()}`;
+  const langTtlMs = 12 * 60 * 60 * 1000;
+  const lastLangSeedAt = metaGetNumber(langKey);
+  if (lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
+
   const today = new Date().toISOString().slice(0, 10);
   const past365 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const future365 = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -162,14 +194,18 @@ async function seedLanguageIfSparse(langName) {
   ]);
 
   const ids = Array.from(new Set([...recentHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, 16);
+  let wrote = 0;
   for (const tmdbId of ids) {
     try {
       const full = await tmdbGetMovieFull(tmdbId);
       upsertMovieFromTmdb(db, full);
+      wrote++;
     } catch {
       // ignore
     }
   }
+
+  if (wrote > 0) metaSet(langKey, String(Date.now()));
 }
 
 async function enrichMovieIfNeeded(movieId, opts = {}) {
@@ -967,7 +1003,15 @@ function ensureSeedTitles() {
 }
 
 let homeSeedInFlight = null;
-let lastHomeSeedAt = 0;
+// Persisted across restarts via SQLite meta (important for Render restarts).
+let lastHomeSeedAt = metaGetNumber('last_home_seed_at');
+
+const HOME_CACHE_TTL_MS = 30 * 1000;
+const homeCache = new Map(); // key -> { expiresAt: number, payload: any }
+function homeCacheKey(lang) {
+  const l = String(lang || '').trim().toLowerCase();
+  return l || '*';
+}
 
 // In-memory admin tokens (dev-friendly). Tokens are lost on server restart.
 const adminTokens = new Map(); // token -> expiresAt (ms)
@@ -998,6 +1042,9 @@ function normalizeMovieIdInput(raw) {
 
 async function seedHomeFromProviders({ force = false } = {}) {
   const ttlMs = 12 * 60 * 60 * 1000;
+  // Another instance (or a previous run) may have updated the persisted timestamp.
+  const persisted = metaGetNumber('last_home_seed_at');
+  if (persisted > lastHomeSeedAt) lastHomeSeedAt = persisted;
   if (!force && Date.now() - lastHomeSeedAt < ttlMs) return;
   if (homeSeedInFlight) return homeSeedInFlight;
 
@@ -1044,6 +1091,7 @@ async function seedHomeFromProviders({ force = false } = {}) {
     }
 
     lastHomeSeedAt = Date.now();
+    metaSet('last_home_seed_at', String(lastHomeSeedAt));
   })().finally(() => {
     homeSeedInFlight = null;
   });
@@ -1055,7 +1103,8 @@ async function seedIfEmpty() {
   const count = db.prepare('SELECT COUNT(*) as c FROM movies').get().c;
   if (count > 0) {
     // Even if we already have movies, keep "New/Upcoming" shelves fresh periodically.
-    await seedHomeFromProviders().catch(() => {});
+    // Never block user requests on provider refresh.
+    seedHomeFromProviders().catch(() => {});
     return;
   }
 
@@ -1667,6 +1716,9 @@ app.get('/api/admin/status', (req, res) => {
   if (!token) return;
 
   const dbPath = resolveDbPath();
+  const homeSeedMeta = metaGet('last_home_seed_at');
+  const lastHomeSeedAtMs = homeSeedMeta ? Number(homeSeedMeta.value) : lastHomeSeedAt;
+  const safeLastHomeSeedAtMs = Number.isFinite(lastHomeSeedAtMs) ? lastHomeSeedAtMs : 0;
 
   let agentLastRun = null;
   try {
@@ -1699,7 +1751,8 @@ app.get('/api/admin/status', (req, res) => {
     now: nowIso(),
     dbPath,
     counts,
-    lastHomeSeedAt,
+    lastHomeSeedAt: safeLastHomeSeedAtMs,
+    lastHomeSeedAtIso: safeLastHomeSeedAtMs ? new Date(safeLastHomeSeedAtMs).toISOString() : null,
     agentLastRun,
     pending,
     keys: {
@@ -2252,10 +2305,33 @@ app.post('/api/admin/movies/:id/songs/:songId/delete', (req, res) => {
 });
 
 app.get('/api/home', async (_req, res) => {
-  await seedIfEmpty();
   const lang = String(_req.query.lang || '').trim();
+  const refresh = String(_req.query.refresh || '') === '1';
+  const ck = homeCacheKey(lang);
+
+  if (!refresh) {
+    const cached = homeCache.get(ck);
+    if (cached && Date.now() < cached.expiresAt) {
+      // Keep shelves fresh in the background, but return the cached payload immediately.
+      seedIfEmpty().catch(() => {});
+      if (lang) seedLanguageIfSparse(lang).catch(() => {});
+      return res.json(cached.payload);
+    }
+  } else {
+    homeCache.delete(ck);
+  }
+
+  await seedIfEmpty();
   if (lang) {
-    await seedLanguageIfSparse(lang).catch(() => {});
+    // Only block if we have *zero* rows for the language (otherwise return fast and seed in background).
+    const haveLang = db
+      .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
+      .get(lang)?.c;
+    if (!haveLang) {
+      await seedLanguageIfSparse(lang).catch(() => {});
+    } else {
+      seedLanguageIfSparse(lang).catch(() => {});
+    }
   }
   const today = new Date().toISOString().slice(0, 10);
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -2308,8 +2384,18 @@ app.get('/api/home', async (_req, res) => {
 
   // Ensure the visible shelf items have ratings/reviews/trailer where possible.
   const toEnrich = Array.from(new Set([...finalNewIds, ...upcomingIds])).slice(0, 8);
-  for (const id of toEnrich) {
-    await enrichMovieIfNeeded(id);
+  // Never block the home payload on external API calls (TMDB/OMDb/YouTube/etc).
+  // Enrich in the background; the next request will read from SQLite.
+  if (toEnrich.length) {
+    (async () => {
+      for (const id of toEnrich) {
+        try {
+          await enrichMovieIfNeeded(id);
+        } catch {
+          // ignore
+        }
+      }
+    })();
   }
 
   const allGenres = db
@@ -2335,7 +2421,7 @@ app.get('/api/home', async (_req, res) => {
     .all()
     .map((r) => ({ language: r.language || 'Unknown', count: r.c }));
 
-  res.json({
+  const payload = {
     generatedAt: nowIso(),
     sections: {
       new: finalNewIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
@@ -2345,7 +2431,10 @@ app.get('/api/home', async (_req, res) => {
       genres: allGenres,
       languages: allLanguages
     }
-  });
+  };
+
+  homeCache.set(ck, { expiresAt: Date.now() + HOME_CACHE_TTL_MS, payload });
+  res.json(payload);
 });
 
 app.get('/api/search', async (req, res) => {
@@ -2737,7 +2826,14 @@ app.get('/api/browse', async (req, res) => {
   const genre = String(req.query.genre || '').trim();
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 60)));
   if (lang) {
-    await seedLanguageIfSparse(lang).catch(() => {});
+    const haveLang = db
+      .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
+      .get(lang)?.c;
+    if (!haveLang) {
+      await seedLanguageIfSparse(lang).catch(() => {});
+    } else {
+      seedLanguageIfSparse(lang).catch(() => {});
+    }
   }
 
   const ids = db
@@ -2757,8 +2853,17 @@ app.get('/api/browse', async (req, res) => {
     .map((r) => r.id);
 
   // Ensure the first page is enriched for ratings/reviews/trailer.
-  for (const id of ids.slice(0, 10)) {
-    await enrichMovieIfNeeded(id);
+  const toEnrich = ids.slice(0, 10);
+  if (toEnrich.length) {
+    (async () => {
+      for (const id of toEnrich) {
+        try {
+          await enrichMovieIfNeeded(id);
+        } catch {
+          // ignore
+        }
+      }
+    })();
   }
 
   res.json({
