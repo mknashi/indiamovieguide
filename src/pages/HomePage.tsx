@@ -234,7 +234,7 @@ export function HomePage({ lang }: { lang?: string }) {
           <div style={{ marginTop: 12 }} className="tagline">
             Showing <strong>{activeGenre}</strong> titles{' '}
             <a href="#browse-results" style={{ textDecoration: 'underline' }}>
-              <RiArrowRightUpLine style={{ marginRight: 4, verticalAlign: 'text-bottom' }} />
+              <span style={{marginRight: 4, display: 'inline-flex', alignItems: 'center'}}><RiArrowRightUpLine  /></span>
               jump to results
             </a>
           </div>

@@ -33,7 +33,7 @@ export function SearchBar({
           }}
         />
         <button onClick={() => onSubmit(q.trim())}>
-          <RiSearchLine style={{ marginRight: 8, verticalAlign: 'text-bottom' }} />
+          <span style={{marginRight: 8, display: 'inline-flex', alignItems: 'center'}}><RiSearchLine  /></span>
           Search
         </button>
       </div>

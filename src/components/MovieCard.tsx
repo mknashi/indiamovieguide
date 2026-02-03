@@ -60,7 +60,7 @@ export function MovieCard({ movie }: { movie: Movie }) {
           <span className="chip">{movie.language}</span>
           {movie.releaseDate && (
             <span className="chip">
-              <RiCalendar2Line size={14} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+              <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiCalendar2Line size={14}  /></span>
               {formatDate(movie.releaseDate)}
             </span>
           )}
@@ -97,7 +97,7 @@ export function MovieCard({ movie }: { movie: Movie }) {
 
         <div className="card-row">
           <div className="card-kicker">
-            <RiUser3Line size={14} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+            <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiUser3Line size={14}  /></span>
             Cast
           </div>
           <div className="meta card-row-chips">
@@ -134,7 +134,7 @@ export function MovieCard({ movie }: { movie: Movie }) {
 
         <div className="card-row">
           <div className="card-kicker">
-            <RiTv2Line size={14} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+            <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiTv2Line size={14}  /></span>
             Watch
           </div>
           <div className="meta card-row-chips">
@@ -164,7 +164,7 @@ export function MovieCard({ movie }: { movie: Movie }) {
 
         <div className="card-row">
           <div className="card-kicker">
-            <RiYoutubeFill size={14} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+            <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiYoutubeFill size={14}  /></span>
             Songs
           </div>
           <div className="meta card-row-chips">
@@ -205,7 +205,7 @@ export function MovieCard({ movie }: { movie: Movie }) {
               navigate(href);
             }}
           >
-            <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+            <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiPlayLine  /></span>
             Open
           </a>
         </div>

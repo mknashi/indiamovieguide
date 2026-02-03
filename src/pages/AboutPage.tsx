@@ -6,7 +6,7 @@ export function AboutPage() {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate('/')}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+          <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiArrowLeftLine  /></span>
           Back
         </button>
         <span className="inline-pill">About</span>

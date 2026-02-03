@@ -18,7 +18,7 @@ export function SongRoll({ songs }: Props) {
           <div key={song.id} className="song">
             <div>
               <strong>
-                <RiMusic2Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+                <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiMusic2Line  /></span>
                 {song.title}
               </strong>
               <div className="tagline">{song.singers.join(', ')}</div>
@@ -26,7 +26,7 @@ export function SongRoll({ songs }: Props) {
             {song.youtubeUrl && (
               <a href={song.youtubeUrl} target="_blank" rel="noreferrer">
                 Open
-                <RiArrowRightUpLine style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
+                <span style={{marginLeft: 6, display: 'inline-flex', alignItems: 'center'}}><RiArrowRightUpLine  /></span>
               </a>
             )}
           </div>

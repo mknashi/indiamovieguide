@@ -80,7 +80,7 @@ export function SongPage({ id }: { id: string }) {
             else navigate('/');
           }}
         >
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+          <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiArrowLeftLine  /></span>
           Back
         </button>
         <span className="inline-pill">Song</span>
@@ -122,9 +122,9 @@ export function SongPage({ id }: { id: string }) {
                     <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
                     <div style={{ marginTop: 10 }}>
                       <a className="ghost-button" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                        <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiPlayLine  /></span>
                         Open song
-                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: 'text-bottom' }} />
+                        <span style={{marginLeft: 8, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine  /></span>
                       </a>
                     </div>
                   </div>
@@ -132,7 +132,7 @@ export function SongPage({ id }: { id: string }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <a className="chip" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                  YouTube link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
+                  YouTube link <span style={{marginLeft: 6, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine size={14}  /></span>
                 </a>
               </div>
             </>
@@ -142,7 +142,7 @@ export function SongPage({ id }: { id: string }) {
               {ytSearchUrl ? (
                 <div style={{ marginTop: 10 }}>
                   <a className="chip" href={ytSearchUrl} target="_blank" rel="noreferrer">
-                    Search on YouTube <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
+                    Search on YouTube <span style={{marginLeft: 6, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine size={14}  /></span>
                   </a>
                 </div>
               ) : null}
