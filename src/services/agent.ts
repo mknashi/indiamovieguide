@@ -22,9 +22,17 @@ export interface HomePayload {
   };
 }
 
-export async function fetchHome(language?: string, signal?: AbortSignal): Promise<HomePayload | null> {
+export async function fetchHome(
+  language?: string,
+  opts?: { refresh?: boolean; signal?: AbortSignal }
+): Promise<HomePayload | null> {
   try {
-    const url = language ? `/api/home?lang=${encodeURIComponent(language)}` : '/api/home';
+    const refresh = !!opts?.refresh;
+    const signal = opts?.signal;
+    const qp = new URLSearchParams();
+    if (language) qp.set('lang', language);
+    if (refresh) qp.set('refresh', '1');
+    const url = `/api/home${qp.toString() ? `?${qp.toString()}` : ''}`;
     const res = await fetch(url, { cache: 'no-store', signal });
     if (!res.ok) return null;
     return (await res.json()) as HomePayload;

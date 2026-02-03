@@ -11,7 +11,7 @@ type SpotlightGroup = {
   persons: { tmdbId: number; name: string; profileImage?: string }[];
 };
 
-export function HomePage({ lang }: { lang?: string }) {
+export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [homeNew, setHomeNew] = useState<Movie[]>([]);
   const [homeUpcoming, setHomeUpcoming] = useState<Movie[]>([]);
@@ -27,7 +27,7 @@ export function HomePage({ lang }: { lang?: string }) {
       setActiveGenre(null);
       setGenreMovies([]);
       try {
-        const payload = await fetchHome(lang);
+        const payload = await fetchHome(lang, { refresh: !!refresh });
         if (!alive) return;
         setHomeNew(payload?.sections?.new || []);
         setHomeUpcoming(payload?.sections?.upcoming || []);
@@ -39,7 +39,7 @@ export function HomePage({ lang }: { lang?: string }) {
     return () => {
       alive = false;
     };
-  }, [lang]);
+  }, [lang, refresh]);
 
   useEffect(() => {
     let alive = true;

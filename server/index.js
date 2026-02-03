@@ -154,7 +154,7 @@ function isLikelyIndianMovie(full) {
   return INDIAN_LANGUAGES_LOWER.includes(String(full.language || '').toLowerCase());
 }
 
-async function seedLanguageIfSparse(langName) {
+async function seedLanguageIfSparse(langName, opts = {}) {
   const code = LANG_TO_TMDB[langName];
   if (!code) return;
 
@@ -178,39 +178,58 @@ async function seedLanguageIfSparse(langName) {
       )
       .get(langName, today)?.c || 0;
 
+  const desiredUpcoming = Math.max(2, Number(process.env.LANG_SEED_DESIRED_UPCOMING || 0) || 6);
+  const desiredTotal = Math.max(24, Number(process.env.LANG_SEED_DESIRED_TOTAL || 0) || 48);
+  const force = opts?.force === true;
+
   // If we already have a decent number of titles and at least some upcoming, skip.
   // Otherwise, refresh this language in the background.
-  if (haveTotal >= 30 && haveUpcoming >= 6) return;
+  if (!force && haveTotal >= desiredTotal && haveUpcoming >= desiredUpcoming) return;
 
   const langKey = `last_lang_seed_at:${String(langName || '').toLowerCase()}`;
-  const langTtlMs = 12 * 60 * 60 * 1000;
+  // If we're still missing a decent catalog/upcoming shelf, retry more often.
+  const langTtlMs =
+    haveTotal < desiredTotal || haveUpcoming < desiredUpcoming ? 30 * 60 * 1000 : 12 * 60 * 60 * 1000;
   const lastLangSeedAt = metaGetNumber(langKey);
-  if (lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
+  if (!force && lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
   const past365 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const future365 = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const [recentHits, upcomingHits] = await Promise.all([
-    tmdbDiscoverMovies({
-      dateGte: past365,
-      dateLte: today,
-      sortBy: 'popularity.desc',
-      page: 1,
-      region: 'IN',
-      languages: [code],
-      voteCountGte: 0
-    }).catch(() => []),
-    tmdbDiscoverMovies({
-      dateGte: today,
-      dateLte: future365,
-      sortBy: 'popularity.desc',
-      page: 1,
-      region: 'IN',
-      languages: [code],
-      voteCountGte: 0
-    }).catch(() => [])
-  ]);
+  const pages = Math.max(1, Math.min(5, Number(process.env.LANG_SEED_PAGES || 0) || 3));
+  const maxIds = Math.max(16, Math.min(120, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
 
-  const ids = Array.from(new Set([...recentHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, 16);
+  const recentTasks = [];
+  const upcomingTasks = [];
+  for (let p = 1; p <= pages; p++) {
+    recentTasks.push(
+      tmdbDiscoverMovies({
+        dateGte: past365,
+        dateLte: today,
+        sortBy: 'popularity.desc',
+        page: p,
+        region: 'IN',
+        languages: [code],
+        voteCountGte: 0
+      }).catch(() => [])
+    );
+    upcomingTasks.push(
+      tmdbDiscoverMovies({
+        dateGte: today,
+        dateLte: future365,
+        sortBy: 'popularity.desc',
+        page: p,
+        region: 'IN',
+        languages: [code],
+        voteCountGte: 0
+      }).catch(() => [])
+    );
+  }
+
+  const [recentPages, upcomingPages] = await Promise.all([Promise.all(recentTasks), Promise.all(upcomingTasks)]);
+  const recentHits = recentPages.flat();
+  const upcomingHits = upcomingPages.flat();
+
+  const ids = Array.from(new Set([...recentHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, maxIds);
   let wrote = 0;
   for (const tmdbId of ids) {
     try {
@@ -2391,10 +2410,10 @@ app.get('/api/home', async (_req, res) => {
     const haveLang = db
       .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
       .get(lang)?.c;
-    if (!haveLang) {
-      await seedLanguageIfSparse(lang).catch(() => {});
+    if (!haveLang || (refresh && haveLang < 24)) {
+      await seedLanguageIfSparse(lang, { force: refresh }).catch(() => {});
     } else {
-      seedLanguageIfSparse(lang).catch(() => {});
+      seedLanguageIfSparse(lang, { force: refresh }).catch(() => {});
     }
   }
   const today = new Date().toISOString().slice(0, 10);

@@ -151,7 +151,7 @@ export default function App() {
         </div>
       </nav>
 
-      {route.name === 'home' && <HomePage lang={route.lang} />}
+      {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
       {route.name === 'search' && <SearchPage q={route.q} />}
       {route.name === 'movie' && <MoviePage id={route.id} />}
       {route.name === 'movie_reviews' && <MovieReviewsPage id={route.id} />}
