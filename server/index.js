@@ -24,7 +24,7 @@ import {
   tmdbSearchMovie,
   tmdbSearchPerson
 } from './providers/tmdb.js';
-import { youtubeSearch } from './providers/youtube.js';
+import { youtubeSearchCached } from './providers/youtube.js';
 import {
   wikipediaSearch,
   wikipediaSearchTitle,
@@ -280,7 +280,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     upsertMovieFromTmdb(db, full);
 
     if (!full.trailerUrl) {
-      const yt = await youtubeSearch(`${full.title} official trailer`).catch(() => []);
+      const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
       const trailerUrl = yt[0]?.youtubeUrl || '';
       if (trailerUrl) {
         db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(
@@ -589,11 +589,13 @@ async function youtubeSearchSongsForMovie({ title, year, language, hints }) {
     queries.push(`${movieTitle} ${t} song`.trim());
     queries.push(`${movieTitle} ${t} lyrical`.trim());
   }
+  // YouTube search.list is quota-expensive; keep the number of queries bounded.
+  const queryLimit = Math.max(1, Math.min(8, Number(process.env.YOUTUBE_SONG_QUERY_LIMIT || 0) || 2));
   const all = [];
   const rel = ytLangCode(lang);
-  for (const q of queries) {
-    const hits = await youtubeSearch(q, {
-      maxResults: 12,
+  for (const q of queries.slice(0, queryLimit)) {
+    const hits = await youtubeSearchCached(db, q, {
+      maxResults: 10,
       videoCategoryId: 10,
       relevanceLanguage: rel || undefined,
       regionCode: 'IN'
@@ -627,8 +629,8 @@ async function youtubeSearchSongsForMovie({ title, year, language, hints }) {
   ].filter(Boolean);
 
   const raw = [];
-  for (const q of fallbackQueries) {
-    const hits = await youtubeSearch(q, {
+  for (const q of fallbackQueries.slice(0, Math.min(2, fallbackQueries.length))) {
+    const hits = await youtubeSearchCached(db, q, {
       maxResults: 10,
       videoCategoryId: 10,
       relevanceLanguage: rel2 || undefined,
@@ -763,10 +765,10 @@ async function youtubeMatchVideosForTracklist({ movieTitle, language, year, trac
   const q1 = `${movieTitle} ${language ? `${language} ` : ''}songs`.trim();
   const q2 = `${movieTitle} ${language ? `${language} ` : ''}jukebox`.trim();
   const [a, b] = await Promise.all([
-    youtubeSearch(q1, { maxResults: 25, videoCategoryId: 10, relevanceLanguage: rel || undefined, regionCode: 'IN' }).catch(
+    youtubeSearchCached(db, q1, { maxResults: 25, videoCategoryId: 10, relevanceLanguage: rel || undefined, regionCode: 'IN' }).catch(
       () => []
     ),
-    youtubeSearch(q2, { maxResults: 15, videoCategoryId: 10, relevanceLanguage: rel || undefined, regionCode: 'IN' }).catch(
+    youtubeSearchCached(db, q2, { maxResults: 15, videoCategoryId: 10, relevanceLanguage: rel || undefined, regionCode: 'IN' }).catch(
       () => []
     )
   ]);
@@ -798,7 +800,8 @@ async function youtubeMatchVideosForTracklist({ movieTitle, language, year, trac
   // If pool-based matching fails, do a limited number of per-track lookups.
   // This improves link coverage when track titles come from a catalog (iTunes) but
   // YouTube video titles don't include enough movie tokens.
-  const missing = tracks.filter((t) => !out.get(t)).slice(0, 16);
+  const perTrackLimit = Math.max(0, Math.min(16, Number(process.env.YOUTUBE_PER_TRACK_LOOKUPS || 0) || 0));
+  const missing = tracks.filter((t) => !out.get(t)).slice(0, perTrackLimit);
   for (const t of missing) {
     const artist = (trackArtists && (trackArtists.get ? trackArtists.get(t) : trackArtists[t])) || '';
     const queries = [];
@@ -816,7 +819,7 @@ async function youtubeMatchVideosForTracklist({ movieTitle, language, year, trac
 
     let hits = [];
     for (const q of queries) {
-      hits = await youtubeSearch(q, {
+      hits = await youtubeSearchCached(db, q, {
         maxResults: 14,
         // Best-effort mode favors link coverage; don't over-constrain by category.
         ...(mode === 'bestEffort' ? {} : { videoCategoryId: 10 }),
@@ -1719,6 +1722,7 @@ app.get('/api/admin/status', (req, res) => {
   const homeSeedMeta = metaGet('last_home_seed_at');
   const lastHomeSeedAtMs = homeSeedMeta ? Number(homeSeedMeta.value) : lastHomeSeedAt;
   const safeLastHomeSeedAtMs = Number.isFinite(lastHomeSeedAtMs) ? lastHomeSeedAtMs : 0;
+  const ytQuotaUntilMs = metaGetNumber('youtube_quota_until');
 
   let agentLastRun = null;
   try {
@@ -1753,6 +1757,7 @@ app.get('/api/admin/status', (req, res) => {
     counts,
     lastHomeSeedAt: safeLastHomeSeedAtMs,
     lastHomeSeedAtIso: safeLastHomeSeedAtMs ? new Date(safeLastHomeSeedAtMs).toISOString() : null,
+    youtubeQuotaUntilIso: ytQuotaUntilMs ? new Date(ytQuotaUntilMs).toISOString() : null,
     agentLastRun,
     pending,
     keys: {
@@ -2500,7 +2505,7 @@ app.get('/api/search', async (req, res) => {
 
       // If TMDB trailer is missing, try YouTube "official trailer".
       if (!full.trailerUrl) {
-        const yt = await youtubeSearch(`${full.title} official trailer`).catch(() => []);
+        const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
         const trailerUrl = yt[0]?.youtubeUrl || '';
         if (trailerUrl) {
           db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(

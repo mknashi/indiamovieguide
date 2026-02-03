@@ -31,6 +31,15 @@ export function migrate(db) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS api_cache (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_cache_expires ON api_cache(expires_at);
+
     CREATE TABLE IF NOT EXISTS movies (
       id TEXT PRIMARY KEY,
       tmdb_id INTEGER,
