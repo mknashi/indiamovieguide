@@ -87,7 +87,7 @@ export function SubmitPage() {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate('/account')}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">Submit</span>
@@ -378,7 +378,7 @@ export function SubmitPage() {
               }
             }}
           >
-            <RiSendPlane2Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+            <RiSendPlane2Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
             Submit for review
           </button>
         </div>

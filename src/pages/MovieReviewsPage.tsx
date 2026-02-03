@@ -103,7 +103,7 @@ export function MovieReviewsPage({ id }: { id: string }) {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate(`/movie/${encodeURIComponent(id)}`)}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">Reviews</span>
@@ -131,12 +131,12 @@ export function MovieReviewsPage({ id }: { id: string }) {
               </div>
               <div className="meta" style={{ marginTop: 10 }}>
                 <span className="chip">
-                  <RiChat3Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                  <RiChat3Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                   {reviews.length} user reviews
                 </span>
                 {avgText ? (
                   <span className="rating">
-                    <RiStarLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                    <RiStarLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                     {avgText}
                   </span>
                 ) : null}

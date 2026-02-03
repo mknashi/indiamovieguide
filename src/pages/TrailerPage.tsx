@@ -61,7 +61,7 @@ export function TrailerPage({ id }: { id: string }) {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate(`/movie/${encodeURIComponent(id)}`)}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back to movie
         </button>
         <span className="inline-pill">Trailer</span>
@@ -101,9 +101,9 @@ export function TrailerPage({ id }: { id: string }) {
                     <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
                     <div style={{ marginTop: 10 }}>
                       <a className="ghost-button" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                        <RiPlayLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                        <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                         Open trailer
-                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: '-2px' }} />
+                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: 'text-bottom' }} />
                       </a>
                     </div>
                   </div>
@@ -111,7 +111,7 @@ export function TrailerPage({ id }: { id: string }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <a className="chip" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                  Trailer link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: '-2px' }} />
+                  Trailer link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
                 </a>
               </div>
             </>
@@ -121,4 +121,3 @@ export function TrailerPage({ id }: { id: string }) {
     </div>
   );
 }
-

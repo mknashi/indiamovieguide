@@ -93,7 +93,7 @@ export function MoviePage({ id }: { id: string }) {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate('/')}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">Movie</span>
@@ -128,7 +128,7 @@ export function MoviePage({ id }: { id: string }) {
                     <span className="chip">{formatDate(movie.releaseDate)}</span>
                     {typeof movie.rating === 'number' ? (
                       <span className="rating">
-                        <RiStarLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                        <RiStarLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                         {movie.rating.toFixed(1)}/10
                       </span>
                     ) : null}
@@ -151,7 +151,7 @@ export function MoviePage({ id }: { id: string }) {
                       }}
                       style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center' }}
                     >
-                      <RiPlayLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                      <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                       Trailer
                     </a>
                   )}
@@ -164,7 +164,7 @@ export function MoviePage({ id }: { id: string }) {
                           type="button"
                           onClick={() => navigate(`/movie/${encodeURIComponent(id)}/reviews`)}
                         >
-                          <RiChat3Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                          <RiChat3Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                           Reviews
                         </button>
                         <button
@@ -183,7 +183,7 @@ export function MoviePage({ id }: { id: string }) {
                           onClick={() => navigate(`/movie/${encodeURIComponent(id)}/reviews`)}
                           title="User ratings & reviews"
                         >
-                          <RiChat3Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                          <RiChat3Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                           Reviews
                         </button>
 
@@ -211,7 +211,7 @@ export function MoviePage({ id }: { id: string }) {
                             }
                           }}
                         >
-                          <RiHeart3Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                          <RiHeart3Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                           {lists?.favorite ? 'Favorited' : 'Favorite'}
                         </button>
 
@@ -239,7 +239,7 @@ export function MoviePage({ id }: { id: string }) {
                             }
                           }}
                         >
-                          <RiListCheck2 style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                          <RiListCheck2 style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                           {lists?.watchlist ? 'In watchlist' : 'Watchlist'}
                         </button>
                       </>

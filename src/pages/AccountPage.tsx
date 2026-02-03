@@ -89,7 +89,7 @@ export function AccountPage() {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate('/')}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">Account</span>
@@ -120,7 +120,7 @@ export function AccountPage() {
                   await refresh();
                 }}
               >
-                <RiLogoutBoxRLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                <RiLogoutBoxRLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                 Sign out
               </button>
             </div>
@@ -130,7 +130,7 @@ export function AccountPage() {
               <div className="search" style={{ marginTop: 10 }}>
                 <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Display name" />
                 <button type="button" onClick={async () => { await postJson('/api/me/profile', { displayName, avatarUrl }); await refresh(); }}>
-                  <RiPencilLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                  <RiPencilLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                   Save
                 </button>
               </div>
@@ -150,7 +150,7 @@ export function AccountPage() {
 
             <div className="meta" style={{ marginTop: 12 }}>
               <a className="chip" href="/submit" onClick={(e) => { e.preventDefault(); navigate('/submit'); }}>
-                <RiSendPlane2Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                <RiSendPlane2Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                 Add new movie / TV
               </a>
               <span className="chip">
@@ -161,7 +161,7 @@ export function AccountPage() {
 
           <div className="section-header">
             <h3>
-              <RiHeart3Line style={{ marginRight: 6, verticalAlign: '-3px' }} />
+              <RiHeart3Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
               Favorites
             </h3>
             <span className="inline-pill">{favorites.length}</span>
@@ -178,7 +178,7 @@ export function AccountPage() {
 
           <div className="section-header">
             <h3>
-              <RiListCheck2 style={{ marginRight: 6, verticalAlign: '-3px' }} />
+              <RiListCheck2 style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
               Watchlist
             </h3>
             <span className="inline-pill">{watchlist.length}</span>

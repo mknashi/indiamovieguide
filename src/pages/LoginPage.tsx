@@ -33,7 +33,7 @@ export function LoginPage({ next }: { next?: string }) {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate('/')}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">{mode === 'login' ? 'Sign in' : 'Create account'}</span>
@@ -46,7 +46,7 @@ export function LoginPage({ next }: { next?: string }) {
             className={`filter ${mode === 'login' ? 'active' : ''}`}
             onClick={() => setMode('login')}
           >
-            <RiLock2Line style={{ marginRight: 6, verticalAlign: '-2px' }} />
+            <RiLock2Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
             Sign in
           </button>
           <button
@@ -54,7 +54,7 @@ export function LoginPage({ next }: { next?: string }) {
             className={`filter ${mode === 'signup' ? 'active' : ''}`}
             onClick={() => setMode('signup')}
           >
-            <RiUserAddLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+            <RiUserAddLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
             Sign up
           </button>
         </div>

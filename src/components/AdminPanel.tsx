@@ -225,7 +225,7 @@ export function AdminPanel({
         <div style={{ fontWeight: 800 }}>Admin</div>
         {variant === 'modal' && onClose ? (
           <button className="ghost-button" onClick={onClose} type="button">
-            <RiCloseLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+            <RiCloseLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
             Close
           </button>
         ) : null}
@@ -235,7 +235,7 @@ export function AdminPanel({
           {!loggedIn ? (
             <div className="detail">
               <h4>
-                <RiLock2Line style={{ marginRight: 6, verticalAlign: '-3px' }} />
+                <RiLock2Line style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                 Sign in
               </h4>
               <div className="tagline">Enter the admin password (server env `ADMIN_PASSWORD`).</div>
@@ -283,7 +283,7 @@ export function AdminPanel({
                       await loadStatus(token);
                     }}
                   >
-                    <RiRefreshLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                    <RiRefreshLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                     Refresh
                   </button>
                 </div>
@@ -765,7 +765,7 @@ export function AdminPanel({
                       await loadQueue(token);
                     }}
                   >
-                    <RiRefreshLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                    <RiRefreshLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                     Refresh queue
                   </button>
                 </div>
@@ -980,7 +980,7 @@ export function AdminPanel({
                     }
                   }}
                 >
-                  <RiLogoutBoxRLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                  <RiLogoutBoxRLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                   Sign out
                 </button>
               </div>

@@ -104,7 +104,7 @@ export default function App() {
             onClick={() => navigate('/search')}
             title="Search"
           >
-            <RiSearchLine style={{ marginRight: 8, verticalAlign: '-2px' }} />
+            <RiSearchLine style={{ marginRight: 8, verticalAlign: 'text-bottom' }} />
             Search
           </button>
 
@@ -124,7 +124,7 @@ export default function App() {
                   borderRadius: 999,
                   objectFit: 'cover',
                   marginRight: 8,
-                  verticalAlign: '-3px',
+                  verticalAlign: 'text-bottom',
                   border: '1px solid rgba(255,255,255,0.14)'
                 }}
               />
@@ -144,7 +144,7 @@ export default function App() {
                 {initials}
               </span>
             ) : (
-              <RiUser3Line style={{ marginRight: 8, verticalAlign: '-2px' }} />
+              <RiUser3Line style={{ marginRight: 8, verticalAlign: 'text-bottom' }} />
             )}
             {me ? 'Account' : 'Login'}
           </button>

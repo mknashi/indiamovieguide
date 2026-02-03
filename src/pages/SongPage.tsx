@@ -80,7 +80,7 @@ export function SongPage({ id }: { id: string }) {
             else navigate('/');
           }}
         >
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
           Back
         </button>
         <span className="inline-pill">Song</span>
@@ -122,9 +122,9 @@ export function SongPage({ id }: { id: string }) {
                     <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
                     <div style={{ marginTop: 10 }}>
                       <a className="ghost-button" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                        <RiPlayLine style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                        <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
                         Open song
-                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: '-2px' }} />
+                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: 'text-bottom' }} />
                       </a>
                     </div>
                   </div>
@@ -132,7 +132,7 @@ export function SongPage({ id }: { id: string }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <a className="chip" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                  YouTube link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: '-2px' }} />
+                  YouTube link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
                 </a>
               </div>
             </>
@@ -142,7 +142,7 @@ export function SongPage({ id }: { id: string }) {
               {ytSearchUrl ? (
                 <div style={{ marginTop: 10 }}>
                   <a className="chip" href={ytSearchUrl} target="_blank" rel="noreferrer">
-                    Search on YouTube <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: '-2px' }} />
+                    Search on YouTube <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
                   </a>
                 </div>
               ) : null}
