@@ -148,6 +148,8 @@ const LANG_TO_TMDB = {
   Bengali: 'bn'
 };
 
+const SUPPORTED_LANGUAGES = Object.keys(LANG_TO_TMDB);
+
 function isLikelyIndianMovie(full) {
   if (!full) return false;
   if (Array.isArray(full.productionCountries) && full.productionCountries.includes('IN')) return true;
@@ -242,6 +244,27 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   }
 
   if (wrote > 0) metaSet(langKey, String(Date.now()));
+  return { lang: langName, attempted: ids.length, wrote };
+}
+
+async function seedAllLanguages({ force = false } = {}) {
+  const key = 'last_all_languages_seed_at';
+  const ttlMs = 12 * 60 * 60 * 1000;
+  const last = metaGetNumber(key);
+  if (!force && last && Date.now() - last < ttlMs) return { skipped: true, reason: 'ttl', last };
+
+  const results = [];
+  for (const lang of SUPPORTED_LANGUAGES) {
+    try {
+      const r = await seedLanguageIfSparse(lang, { force });
+      results.push(r || { lang, attempted: 0, wrote: 0 });
+    } catch {
+      results.push({ lang, attempted: 0, wrote: 0, error: true });
+    }
+  }
+
+  metaSet(key, String(Date.now()));
+  return { skipped: false, results };
 }
 
 async function enrichMovieIfNeeded(movieId, opts = {}) {
@@ -1136,43 +1159,67 @@ async function seedHomeFromProviders({ force = false } = {}) {
 
     // Two curated shelves: "New" (last 45 days) and "Upcoming" (next 180 days) for region IN.
     const languages = defaultIndianLanguageCodes();
-    const [newHits, upcomingHits] = await Promise.all([
-      tmdbDiscoverMovies({
-        dateGte: past45,
-        dateLte: today,
-        sortBy: 'popularity.desc',
-        page: 1,
-        region: 'IN',
-        languages,
-        voteCountGte: 0
-      }).catch(() => []),
-      tmdbDiscoverMovies({
-        dateGte: today,
-        dateLte: future180,
-        sortBy: 'popularity.desc',
-        page: 1,
-        region: 'IN',
-        languages,
-        voteCountGte: 0
-      }).catch(() => [])
-    ]);
+    const pages = Math.max(1, Math.min(5, Number(process.env.HOME_SEED_PAGES || 0) || 2));
+    const maxIds = Math.max(40, Math.min(180, Number(process.env.HOME_SEED_MAX_IDS || 0) || 80));
+    const concurrency = Math.max(1, Math.min(8, Number(process.env.HOME_SEED_CONCURRENCY || 0) || 4));
 
-    const uniqueIds = Array.from(new Set([...newHits, ...upcomingHits].map((h) => h.tmdbId))).slice(
-      0,
-      40
-    );
-
-    for (const tmdbId of uniqueIds) {
-      try {
-        const full = await tmdbGetMovieFull(tmdbId);
-        upsertMovieFromTmdb(db, full);
-      } catch {
-        // ignore
-      }
+    const newTasks = [];
+    const upcomingTasks = [];
+    for (let p = 1; p <= pages; p++) {
+      newTasks.push(
+        tmdbDiscoverMovies({
+          dateGte: past45,
+          dateLte: today,
+          sortBy: 'popularity.desc',
+          page: p,
+          region: 'IN',
+          languages,
+          voteCountGte: 0
+        }).catch(() => [])
+      );
+      upcomingTasks.push(
+        tmdbDiscoverMovies({
+          dateGte: today,
+          dateLte: future180,
+          sortBy: 'popularity.desc',
+          page: p,
+          region: 'IN',
+          languages,
+          voteCountGte: 0
+        }).catch(() => [])
+      );
     }
+
+    const [newPages, upcomingPages] = await Promise.all([Promise.all(newTasks), Promise.all(upcomingTasks)]);
+    const newHits = newPages.flat();
+    const upcomingHits = upcomingPages.flat();
+
+    const uniqueIds = Array.from(new Set([...newHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, maxIds);
+
+    // Concurrency-limited upsert (TMDB movie full fetch is the expensive part).
+    const q = uniqueIds.slice();
+    const workers = Array.from({ length: concurrency }).map(async () => {
+      while (q.length) {
+        const tmdbId = q.shift();
+        if (!tmdbId) return;
+        try {
+          const full = await tmdbGetMovieFull(tmdbId);
+          upsertMovieFromTmdb(db, full);
+        } catch {
+          // ignore
+        }
+      }
+    });
+    await Promise.all(workers);
 
     lastHomeSeedAt = Date.now();
     metaSet('last_home_seed_at', String(lastHomeSeedAt));
+
+    // While we're refreshing the home shelves, opportunistically seed language shelves too
+    // so `/home?lang=...` has enough "New/Upcoming" without requiring a separate warm-up.
+    if (process.env.HOME_SEED_ALL_LANGUAGES !== '0') {
+      seedAllLanguages({ force: false }).catch(() => {});
+    }
   })().finally(() => {
     homeSeedInFlight = null;
   });
@@ -1801,6 +1848,12 @@ app.get('/api/admin/status', (req, res) => {
   const lastHomeSeedAtMs = homeSeedMeta ? Number(homeSeedMeta.value) : lastHomeSeedAt;
   const safeLastHomeSeedAtMs = Number.isFinite(lastHomeSeedAtMs) ? lastHomeSeedAtMs : 0;
   const ytQuotaUntilMs = metaGetNumber('youtube_quota_until');
+  const allLangSeedMs = metaGetNumber('last_all_languages_seed_at');
+  const languageSeeds = {};
+  for (const l of SUPPORTED_LANGUAGES) {
+    const ms = metaGetNumber(`last_lang_seed_at:${String(l).toLowerCase()}`);
+    languageSeeds[l] = ms ? new Date(ms).toISOString() : null;
+  }
 
   let agentLastRun = null;
   try {
@@ -1835,6 +1888,8 @@ app.get('/api/admin/status', (req, res) => {
     counts,
     lastHomeSeedAt: safeLastHomeSeedAtMs,
     lastHomeSeedAtIso: safeLastHomeSeedAtMs ? new Date(safeLastHomeSeedAtMs).toISOString() : null,
+    lastAllLanguagesSeedAtIso: allLangSeedMs ? new Date(allLangSeedMs).toISOString() : null,
+    languageSeeds,
     youtubeQuotaUntilIso: ytQuotaUntilMs ? new Date(ytQuotaUntilMs).toISOString() : null,
     agentLastRun,
     pending,
@@ -1844,6 +1899,55 @@ app.get('/api/admin/status', (req, res) => {
       omdb: !!process.env.OMDB_API_KEY
     }
   });
+});
+
+app.post('/api/admin/seed/home', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const force = req.body?.force === true;
+  try {
+    await seedHomeFromProviders({ force: true });
+    if (req.body?.seedAllLanguages === true) {
+      await seedAllLanguages({ force });
+    }
+  } catch {
+    // ignore; report best-effort
+  }
+
+  const homeSeed = metaGetNumber('last_home_seed_at');
+  res.json({
+    ok: true,
+    lastHomeSeedAtIso: homeSeed ? new Date(homeSeed).toISOString() : null
+  });
+});
+
+app.post('/api/admin/seed/language', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  const lang = String(req.body?.lang || '').trim();
+  if (!lang) return res.status(400).json({ error: 'missing_lang' });
+  if (!SUPPORTED_LANGUAGES.includes(lang)) return res.status(400).json({ error: 'unsupported_lang' });
+
+  try {
+    const r = await seedLanguageIfSparse(lang, { force: true });
+    return res.json({ ok: true, result: r || { lang, attempted: 0, wrote: 0 } });
+  } catch {
+    return res.status(500).json({ error: 'seed_failed' });
+  }
+});
+
+app.post('/api/admin/seed/all-languages', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const force = req.body?.force === true;
+  try {
+    const r = await seedAllLanguages({ force: force });
+    return res.json({ ok: true, ...r });
+  } catch {
+    return res.status(500).json({ error: 'seed_failed' });
+  }
 });
 
 app.get('/api/admin/moderation', (req, res) => {

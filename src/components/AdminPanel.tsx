@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RiCloseLine, RiLock2Line, RiLogoutBoxRLine, RiRefreshLine } from 'react-icons/ri';
+import {
+  RiCloseLine,
+  RiDashboardLine,
+  RiLock2Line,
+  RiLogoutBoxRLine,
+  RiRefreshLine,
+  RiRocketLine,
+  RiSettings3Line
+} from 'react-icons/ri';
 
 interface AdminStatus {
   now: string;
   dbPath: string;
   counts: { movies: number; persons: number; songs: number; ottOffers: number; ratings: number; reviews: number };
   lastHomeSeedAt: number;
+  lastHomeSeedAtIso?: string | null;
+  lastAllLanguagesSeedAtIso?: string | null;
+  languageSeeds?: Record<string, string | null>;
+  youtubeQuotaUntilIso?: string | null;
   agentLastRun?: {
     startedAt?: string;
     finishedAt?: string;
@@ -111,6 +123,9 @@ export function AdminPanel({
   const [token, setToken] = useState<string>(() => localStorage.getItem('img_admin_token') || '');
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
+  const [tab, setTab] = useState<'overview' | 'seeding' | 'catalog' | 'moderation' | 'ingestion'>('overview');
+  const [seedLang, setSeedLang] = useState<string>('Hindi');
+  const [seedMsg, setSeedMsg] = useState<string | null>(null);
   const [editorQuery, setEditorQuery] = useState('');
   const [editor, setEditor] = useState<AdminMovieEditorPayload | null>(null);
   const [movieForm, setMovieForm] = useState({
@@ -203,6 +218,19 @@ export function AdminPanel({
     return d.toLocaleString();
   }, [status]);
 
+  const lastAllLangSeedText = useMemo(() => {
+    if (!status?.lastAllLanguagesSeedAtIso) return 'never';
+    const d = new Date(status.lastAllLanguagesSeedAtIso);
+    return !Number.isNaN(d.getTime()) ? d.toLocaleString() : String(status.lastAllLanguagesSeedAtIso);
+  }, [status]);
+
+  const ytQuotaText = useMemo(() => {
+    const iso = status?.youtubeQuotaUntilIso;
+    if (!iso) return 'ok';
+    const d = new Date(iso);
+    return !Number.isNaN(d.getTime()) ? `paused until ${d.toLocaleString()}` : `paused until ${iso}`;
+  }, [status]);
+
   const agentLastRunText = useMemo(() => {
     const a = status?.agentLastRun;
     if (!a?.finishedAt && !a?.startedAt) return 'never';
@@ -212,7 +240,14 @@ export function AdminPanel({
   }, [status]);
 
   const body = (
-    <div className="card" style={{ width: 'min(980px, 96vw)', maxHeight: variant === 'modal' ? '88vh' : 'none', overflow: variant === 'modal' ? 'auto' : 'visible' }}>
+    <div
+      className="card"
+      style={{
+        width: 'min(1040px, 96vw)',
+        maxHeight: variant === 'modal' ? '88vh' : 'none',
+        overflow: variant === 'modal' ? 'auto' : 'visible'
+      }}
+    >
       <div
         style={{
           padding: 16,
@@ -222,7 +257,7 @@ export function AdminPanel({
           borderBottom: '1px solid rgba(255,255,255,0.08)'
         }}
       >
-        <div style={{ fontWeight: 800 }}>Admin</div>
+        <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>Admin Console</div>
         {variant === 'modal' && onClose ? (
           <button className="ghost-button" onClick={onClose} type="button">
             <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiCloseLine  /></span>
@@ -274,90 +309,273 @@ export function AdminPanel({
             <>
               <div className="detail">
                 <div className="meta" style={{ justifyContent: 'space-between' }}>
-                  <span className="chip">DB live</span>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={async () => {
-                      if (!token) return;
-                      await loadStatus(token);
-                    }}
-                  >
-                    <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRefreshLine  /></span>
-                    Refresh
-                  </button>
+                  <span className="chip">Admin session active</span>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={async () => {
+                        if (!token) return;
+                        setSeedMsg(null);
+                        await loadStatus(token);
+                        await loadQueue(token);
+                      }}
+                    >
+                      <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRefreshLine  /></span>
+                      Refresh
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={async () => {
+                        if (!token) return;
+                        try {
+                          await postJson('/api/admin/logout', {}, token);
+                        } catch {
+                          // ignore
+                        } finally {
+                          localStorage.removeItem('img_admin_token');
+                          setToken('');
+                          setStatus(null);
+                          setQueue(null);
+                        }
+                      }}
+                    >
+                      <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiLogoutBoxRLine  /></span>
+                      Sign out
+                    </button>
+                  </div>
                 </div>
-                {status && (
-                  <div className="meta" style={{ marginTop: 10 }}>
-                    <span className="chip">Now: {new Date(status.now).toLocaleString()}</span>
-                    <span className="chip">DB: {status.dbPath}</span>
-                    <span className="chip">Last home seed: {lastSeedText}</span>
-                  </div>
-                )}
-                {status && (
-                  <div className="meta" style={{ marginTop: 10 }}>
-                    <span className="chip">Last agent run: {agentLastRunText}</span>
-                    {status.agentLastRun?.upserted != null ? (
-                      <span className="chip">Agent upserted: {status.agentLastRun.upserted}</span>
-                    ) : null}
-                    {status.agentLastRun?.errors != null ? (
-                      <span className="chip">Agent errors: {status.agentLastRun.errors}</span>
-                    ) : null}
-                  </div>
-                )}
-                {status && (
-                  <div className="meta" style={{ marginTop: 10 }}>
-                    <span className="chip">Movies: {status.counts.movies}</span>
-                    <span className="chip">Persons: {status.counts.persons}</span>
-                    <span className="chip">Songs: {status.counts.songs}</span>
-                    <span className="chip">OTT offers: {status.counts.ottOffers}</span>
-                    <span className="chip">Ratings: {status.counts.ratings}</span>
-                    <span className="chip">Reviews: {status.counts.reviews}</span>
-                  </div>
-                )}
-                {status && (
-                  <div className="meta" style={{ marginTop: 10 }}>
-                    <span className="chip">TMDB key: {status.keys.tmdb ? 'set' : 'missing'}</span>
-                    <span className="chip">YouTube key: {status.keys.youtube ? 'set' : 'missing'}</span>
-                    <span className="chip">OMDb key: {status.keys.omdb ? 'set' : 'missing'}</span>
-                    {status.pending ? (
-                      <span className="chip">
-                        Pending: {status.pending.submissions} submissions · {status.pending.userReviews} reviews ·{' '}
-                        {status.pending.personSubmissions} people
-                      </span>
-                    ) : null}
-                  </div>
-                )}
-                {error && <div className="tagline" style={{ marginTop: 10 }}>Error: {error}</div>}
+
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                  {(['overview', 'seeding', 'catalog', 'moderation', 'ingestion'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`filter ${tab === t ? 'active' : ''}`}
+                      onClick={() => setTab(t)}
+                      title={t}
+                    >
+                      {t === 'overview' ? (
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiDashboardLine  /></span>
+                      ) : null}
+                      {t === 'seeding' ? (
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRocketLine  /></span>
+                      ) : null}
+                      {t === 'catalog' ? (
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiSettings3Line  /></span>
+                      ) : null}
+                      {t[0].toUpperCase() + t.slice(1)}
+                    </button>
+                  ))}
+                </div>
+
+                {error ? <div className="tagline" style={{ marginTop: 10 }}>Error: {error}</div> : null}
+                {seedMsg ? <div className="tagline" style={{ marginTop: 10 }}>{seedMsg}</div> : null}
               </div>
 
-              <div className="section-header">
-                <h3>Ingestion</h3>
-                <span className="inline-pill">Admin only</span>
-              </div>
-              <div className="detail">
-                {status?.agentLastRun ? (
-                  <div className="meta" style={{ marginTop: 2 }}>
-                    {status.agentLastRun.startedAt ? <span className="chip">Started: {new Date(status.agentLastRun.startedAt).toLocaleString()}</span> : null}
-                    {status.agentLastRun.finishedAt ? <span className="chip">Finished: {new Date(status.agentLastRun.finishedAt).toLocaleString()}</span> : null}
-                    {status.agentLastRun.discovered != null ? <span className="chip">Discovered: {status.agentLastRun.discovered}</span> : null}
-                    {status.agentLastRun.fetched != null ? <span className="chip">Fetched: {status.agentLastRun.fetched}</span> : null}
-                    {status.agentLastRun.skippedNonIndian != null ? <span className="chip">Skipped non-Indian: {status.agentLastRun.skippedNonIndian}</span> : null}
-                    {status.agentLastRun.trailerUpdated != null ? <span className="chip">Trailer updates: {status.agentLastRun.trailerUpdated}</span> : null}
-                    {status.agentLastRun.songsUpserted != null ? <span className="chip">Songs upserted: {status.agentLastRun.songsUpserted}</span> : null}
-                    {status.agentLastRun.ratingsUpserted != null ? <span className="chip">Ratings upserted: {status.agentLastRun.ratingsUpserted}</span> : null}
+              {tab === 'overview' ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="detail">
+                    {status ? (
+                      <>
+                        <div className="meta">
+                          <span className="chip">Now: {new Date(status.now).toLocaleString()}</span>
+                          <span className="chip">DB: {status.dbPath}</span>
+                          <span className="chip">Home seed: {lastSeedText}</span>
+                          <span className="chip">YouTube: {ytQuotaText}</span>
+                        </div>
+                        <div className="meta" style={{ marginTop: 10 }}>
+                          <span className="chip">Movies: {status.counts.movies}</span>
+                          <span className="chip">Persons: {status.counts.persons}</span>
+                          <span className="chip">Songs: {status.counts.songs}</span>
+                          <span className="chip">OTT: {status.counts.ottOffers}</span>
+                          <span className="chip">Ratings: {status.counts.ratings}</span>
+                          <span className="chip">Reviews: {status.counts.reviews}</span>
+                        </div>
+                        <div className="meta" style={{ marginTop: 10 }}>
+                          <span className="chip">TMDB key: {status.keys.tmdb ? 'set' : 'missing'}</span>
+                          <span className="chip">YouTube key: {status.keys.youtube ? 'set' : 'missing'}</span>
+                          <span className="chip">OMDb key: {status.keys.omdb ? 'set' : 'missing'}</span>
+                          {status.pending ? (
+                            <span className="chip">
+                              Pending: {status.pending.submissions} submissions · {status.pending.userReviews} reviews ·{' '}
+                              {status.pending.personSubmissions} people
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="meta" style={{ marginTop: 10 }}>
+                          <span className="chip">Agent last run: {agentLastRunText}</span>
+                          {status.agentLastRun?.upserted != null ? (
+                            <span className="chip">Upserted: {status.agentLastRun.upserted}</span>
+                          ) : null}
+                          {status.agentLastRun?.errors != null ? (
+                            <span className="chip">Errors: {status.agentLastRun.errors}</span>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="tagline">Loading status…</div>
+                    )}
                   </div>
-                ) : (
-                  <div className="tagline">Agent has not been run yet (or no `.cache/agent-last-run.json` found).</div>
-                )}
-                <ol style={{ paddingLeft: 18, lineHeight: 1.7, color: '#cbd5e1' }}>
-                  <li>Home shelves seed from TMDB Discover (per-language) into SQLite.</li>
-                  <li>Search hits local DB first; on miss it queries TMDB/YouTube/Wikipedia and upserts.</li>
-                  <li>Movies are enriched on demand with ratings + reviews (TMDB, optional OMDb).</li>
-                  <li>Batch ingestion: run <code>npm run agent:run</code> to refresh the catalog and write last-run stats.</li>
-                </ol>
-              </div>
+                </div>
+              ) : null}
 
+              {tab === 'seeding' ? (
+                <div style={{ marginTop: 12 }}>
+                  <div className="detail">
+                    <h4 style={{ marginTop: 0 }}>Seeding</h4>
+                    <div className="tagline">
+                      Use this to warm the cache on Render and refresh language shelves (New/Upcoming) for better coverage.
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          setSeedMsg(null);
+                          try {
+                            await postJson('/api/admin/seed/home', { seedAllLanguages: true }, token);
+                            setSeedMsg('Home shelves seeded (and language shelves kicked off).');
+                            await loadStatus(token);
+                          } catch (e: any) {
+                            setError(e?.message || 'Seed failed');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRocketLine  /></span>
+                        Seed home + languages
+                      </button>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          setSeedMsg(null);
+                          try {
+                            await postJson('/api/admin/seed/all-languages', { force: true }, token);
+                            setSeedMsg('All languages seeded.');
+                            await loadStatus(token);
+                          } catch (e: any) {
+                            setError(e?.message || 'Seed failed');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Seed all languages (force)
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                      <select className="input" value={seedLang} onChange={(e) => setSeedLang(e.target.value)}>
+                        {['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam', 'Marathi', 'Bengali'].map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          setSeedMsg(null);
+                          try {
+                            const r = await postJson('/api/admin/seed/language', { lang: seedLang, force: true }, token);
+                            setSeedMsg(`${seedLang}: attempted ${r?.result?.attempted ?? 0}, wrote ${r?.result?.wrote ?? 0}`);
+                            await loadStatus(token);
+                          } catch (e: any) {
+                            setError(e?.message || 'Seed failed');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Seed language (force)
+                      </button>
+                    </div>
+
+                    {status ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="meta">
+                          <span className="chip">Last all-languages seed: {lastAllLangSeedText}</span>
+                          <span className="chip">Home seed: {lastSeedText}</span>
+                        </div>
+                        {status.languageSeeds ? (
+                          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+                            {Object.entries(status.languageSeeds).map(([k, v]) => (
+                              <div key={k} className="chip" title="Last language seed">
+                                {k}: {v ? new Date(v).toLocaleString() : 'never'}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {tab === 'ingestion' ? (
+                <>
+                  <div className="section-header">
+                    <h3>Ingestion</h3>
+                    <span className="inline-pill">Admin only</span>
+                  </div>
+                  <div className="detail">
+                    {status?.agentLastRun ? (
+                      <div className="meta" style={{ marginTop: 2 }}>
+                        {status.agentLastRun.startedAt ? (
+                          <span className="chip">Started: {new Date(status.agentLastRun.startedAt).toLocaleString()}</span>
+                        ) : null}
+                        {status.agentLastRun.finishedAt ? (
+                          <span className="chip">Finished: {new Date(status.agentLastRun.finishedAt).toLocaleString()}</span>
+                        ) : null}
+                        {status.agentLastRun.discovered != null ? (
+                          <span className="chip">Discovered: {status.agentLastRun.discovered}</span>
+                        ) : null}
+                        {status.agentLastRun.fetched != null ? (
+                          <span className="chip">Fetched: {status.agentLastRun.fetched}</span>
+                        ) : null}
+                        {status.agentLastRun.skippedNonIndian != null ? (
+                          <span className="chip">Skipped non-Indian: {status.agentLastRun.skippedNonIndian}</span>
+                        ) : null}
+                        {status.agentLastRun.trailerUpdated != null ? (
+                          <span className="chip">Trailer updates: {status.agentLastRun.trailerUpdated}</span>
+                        ) : null}
+                        {status.agentLastRun.songsUpserted != null ? (
+                          <span className="chip">Songs upserted: {status.agentLastRun.songsUpserted}</span>
+                        ) : null}
+                        {status.agentLastRun.ratingsUpserted != null ? (
+                          <span className="chip">Ratings upserted: {status.agentLastRun.ratingsUpserted}</span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="tagline">Agent has not been run yet (or no `.cache/agent-last-run.json` found).</div>
+                    )}
+                    <div className="tagline" style={{ marginTop: 10 }}>
+                      Batch ingestion is optional; the site will auto-fill on demand via TMDB and persist results in SQLite.
+                    </div>
+                    <div className="tagline" style={{ marginTop: 8 }}>
+                      To run the batch agent manually, execute <code>npm run agent:run</code> and redeploy.
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {tab === 'catalog' ? (
+              <>
               <div className="section-header">
                 <h3>Catalog editor</h3>
                 <span className="inline-pill">Admin only</span>
@@ -746,29 +964,33 @@ export function AdminPanel({
                   </>
                 ) : null}
               </div>
+              </>
+              ) : null}
 
-              <div className="section-header">
-                <h3>Moderation</h3>
-                <span className="inline-pill">Pending</span>
-              </div>
-              <div className="detail">
-                <div className="meta" style={{ justifyContent: 'space-between' }}>
-                  <span className="chip">
-                    Submissions: {queue?.submissions?.length ?? 0} · Reviews: {queue?.reviews?.length ?? 0} · People:{' '}
-                    {queue?.personSubmissions?.length ?? 0}
-                  </span>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={async () => {
-                      if (!token) return;
-                      await loadQueue(token);
-                    }}
-                  >
-                    <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRefreshLine  /></span>
-                    Refresh queue
-                  </button>
-                </div>
+              {tab === 'moderation' ? (
+                <>
+                  <div className="section-header">
+                    <h3>Moderation</h3>
+                    <span className="inline-pill">Pending</span>
+                  </div>
+                  <div className="detail">
+                    <div className="meta" style={{ justifyContent: 'space-between' }}>
+                      <span className="chip">
+                        Submissions: {queue?.submissions?.length ?? 0} · Reviews: {queue?.reviews?.length ?? 0} ·
+                        People: {queue?.personSubmissions?.length ?? 0}
+                      </span>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={async () => {
+                          if (!token) return;
+                          await loadQueue(token);
+                        }}
+                      >
+                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiRefreshLine  /></span>
+                        Refresh queue
+                      </button>
+                    </div>
 
                 {queue?.reviews?.length ? (
                   <div className="detail" style={{ marginTop: 12 }}>
@@ -960,30 +1182,9 @@ export function AdminPanel({
                     No pending submissions.
                   </div>
                 )}
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={async () => {
-                    if (!token) return;
-                    try {
-                      await postJson('/api/admin/logout', {}, token);
-                    } catch {
-                      // ignore
-                    } finally {
-                      localStorage.removeItem('img_admin_token');
-                      setToken('');
-                      setStatus(null);
-                      setQueue(null);
-                    }
-                  }}
-                >
-                  <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiLogoutBoxRLine  /></span>
-                  Sign out
-                </button>
-              </div>
+                  </div>
+                </>
+              ) : null}
             </>
           )}
 
