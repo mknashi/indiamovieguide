@@ -61,7 +61,9 @@ export function TrailerPage({ id }: { id: string }) {
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
         <button className="ghost-button" type="button" onClick={() => navigate(`/movie/${encodeURIComponent(id)}`)}>
-          <RiArrowLeftLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+          <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
+            <RiArrowLeftLine />
+          </span>
           Back to movie
         </button>
         <span className="inline-pill">Trailer</span>
@@ -101,9 +103,13 @@ export function TrailerPage({ id }: { id: string }) {
                     <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
                     <div style={{ marginTop: 10 }}>
                       <a className="ghost-button" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                        <RiPlayLine style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
+                        <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
+                          <RiPlayLine />
+                        </span>
                         Open trailer
-                        <RiExternalLinkLine style={{ marginLeft: 8, verticalAlign: 'text-bottom' }} />
+                        <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center' }}>
+                          <RiExternalLinkLine />
+                        </span>
                       </a>
                     </div>
                   </div>
@@ -111,7 +117,10 @@ export function TrailerPage({ id }: { id: string }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <a className="chip" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                  Trailer link <RiExternalLinkLine size={14} style={{ marginLeft: 6, verticalAlign: 'text-bottom' }} />
+                  Trailer link{' '}
+                  <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center' }}>
+                    <RiExternalLinkLine size={14} />
+                  </span>
                 </a>
               </div>
             </>
