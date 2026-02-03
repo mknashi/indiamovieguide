@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Option 2: "IMG monogram with play triangle in negative space"
+  - Editable SVG, transparent background.
+  - Uses a mask to "punch out" the play triangle.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="IndiaMovieGuide logo option 2">
+  <defs>
+    <radialGradient id="img2_bg" cx="35%" cy="25%" r="80%">
+      <stop offset="0" stop-color="#22c55e"/>
+      <stop offset="0.45" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#0b1224"/>
+    </radialGradient>
+    <filter id="img2_shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+
+    <!-- Mask removes the play triangle from the monogram -->
+    <mask id="img2_punch" maskUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <!-- "Punch-out" area -->
+      <path d="M252 222 L252 290 L306 256 Z" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Rounded badge -->
+  <rect x="44" y="44" width="424" height="424" rx="120" fill="url(#img2_bg)" filter="url(#img2_shadow)"/>
+
+  <!-- Monogram group -->
+  <g mask="url(#img2_punch)" fill="#f8fafc" opacity="0.98">
+    <!-- I -->
+    <rect x="124" y="160" width="44" height="192" rx="18"/>
+
+    <!-- M (two pillars + center V) -->
+    <rect x="188" y="160" width="44" height="192" rx="18"/>
+    <rect x="280" y="160" width="44" height="192" rx="18"/>
+    <path d="M232 160 L256 216 L280 160 L312 160 L264 268 L216 160 Z"/>
+
+    <!-- G (arc + inner cut) -->
+    <path
+      d="M374 170
+         C326 170 308 206 308 256
+         C308 306 326 342 374 342
+         C410 342 430 320 438 292
+         L398 292
+         C392 304 386 312 374 312
+         C356 312 350 290 350 256
+         C350 222 356 200 374 200
+         C388 200 396 210 402 224
+         L440 224
+         C432 194 410 170 374 170
+         Z"
+    />
+    <!-- G "bar" -->
+    <rect x="388" y="248" width="58" height="34" rx="14"/>
+  </g>
+
+  <!-- Outline of the punch triangle (subtle) -->
+  <path d="M252 222 L252 290 L306 256 Z" fill="rgba(248,250,252,0.12)"/>
+</svg>
+

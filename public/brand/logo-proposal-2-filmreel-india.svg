@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logo Proposal 2 (Revised): "Film Reel Tricolor"
+  An artful film reel with tricolor-gradient rings and decorative cutouts,
+  featuring an Ashoka Chakra-inspired hub. Saffron/white/green + gold.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 280" role="img" aria-label="IndiaMovieGuide logo proposal 2">
+  <defs>
+    <!-- Tricolor vertical gradient -->
+    <linearGradient id="p2_tri" x1="0" y1="20" x2="0" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF9933"/>
+      <stop offset="0.42" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#138808"/>
+    </linearGradient>
+    <!-- Saffron-to-deep-orange warm gradient -->
+    <linearGradient id="p2_warm" x1="40" y1="40" x2="230" y2="230" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF9933"/>
+      <stop offset="0.5" stop-color="#E65100"/>
+      <stop offset="1" stop-color="#FF6D00"/>
+    </linearGradient>
+    <!-- Gold ring gradient -->
+    <linearGradient id="p2_gold_ring" x1="50" y1="50" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD54F"/>
+      <stop offset="0.4" stop-color="#F3A712"/>
+      <stop offset="1" stop-color="#FFB300"/>
+    </linearGradient>
+    <!-- Green accent -->
+    <linearGradient id="p2_green" x1="80" y1="180" x2="200" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#43A047"/>
+      <stop offset="1" stop-color="#138808"/>
+    </linearGradient>
+    <!-- Text gradients -->
+    <linearGradient id="p2_text_main" x1="300" y1="40" x2="900" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF9933"/>
+      <stop offset="0.5" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#138808"/>
+    </linearGradient>
+    <linearGradient id="p2_gold_text" x1="300" y1="140" x2="900" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD54F"/>
+      <stop offset="0.5" stop-color="#F3A712"/>
+      <stop offset="1" stop-color="#FFB300"/>
+    </linearGradient>
+    <filter id="p2_shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <filter id="p2_inner_glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#FF9933" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- ===== ICON: Artful Film Reel ===== -->
+  <g transform="translate(10 10)" filter="url(#p2_shadow)">
+    <!-- Rounded square background -->
+    <rect x="0" y="0" width="260" height="260" rx="52" fill="#0d1b2a"/>
+
+    <!-- Subtle radial backdrop glow -->
+    <circle cx="130" cy="130" r="110" fill="#FF9933" opacity="0.04"/>
+
+    <!-- Outer reel ring (tricolor gradient) -->
+    <circle cx="130" cy="130" r="100" fill="none" stroke="url(#p2_tri)" stroke-width="16" opacity="0.85"/>
+    <!-- Thin gold highlight on outer edge -->
+    <circle cx="130" cy="130" r="109" fill="none" stroke="url(#p2_gold_ring)" stroke-width="2" opacity="0.5"/>
+    <!-- Inner edge of outer ring -->
+    <circle cx="130" cy="130" r="91" fill="none" stroke="url(#p2_gold_ring)" stroke-width="1.5" opacity="0.4"/>
+
+    <!--Middle decorative ring -->
+    <circle cx="130" cy="130" r="76" fill="none" stroke="url(#p2_warm)" stroke-width="8" opacity="0.7"/>
+    <circle cx="130" cy="130" r="71" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+
+    <!--Six reel cutouts (classic film reel holes) -->
+    <!-- Saffron pair (top) -->
+    <circle cx="130" cy="60" r="16" fill="#0d1b2a" stroke="#FF9933" stroke-width="2.5" opacity="0.9"/>
+    <circle cx="130" cy="60" r="6" fill="#FF9933" opacity="0.3"/>
+
+    <circle cx="190.6" cy="95" r="16" fill="#0d1b2a" stroke="#FF9933" stroke-width="2.5" opacity="0.8"/>
+    <circle cx="190.6" cy="95" r="6" fill="#FF9933" opacity="0.25"/>
+
+    <!-- White pair (middle) -->
+    <circle cx="190.6" cy="165" r="16" fill="#0d1b2a" stroke="#FFFFFF" stroke-width="2.5" opacity="0.6"/>
+    <circle cx="190.6" cy="165" r="6" fill="#FFFFFF" opacity="0.2"/>
+
+    <circle cx="69.4" cy="95" r="16" fill="#0d1b2a" stroke="#FFFFFF" stroke-width="2.5" opacity="0.6"/>
+    <circle cx="69.4" cy="95" r="6" fill="#FFFFFF" opacity="0.2"/>
+
+    <!-- Green pair (bottom) -->
+    <circle cx="130" cy="200" r="16" fill="#0d1b2a" stroke="#138808" stroke-width="2.5" opacity="0.9"/>
+    <circle cx="130" cy="200" r="6" fill="#138808" opacity="0.3"/>
+
+    <circle cx="69.4" cy="165" r="16" fill="#0d1b2a" stroke="#138808" stroke-width="2.5" opacity="0.8"/>
+    <circle cx="69.4" cy="165" r="6" fill="#138808" opacity="0.25"/>
+
+    <!--Spokes (subtle, radiating from hub to cutouts) -->
+    <g stroke="url(#p2_gold_ring)" stroke-width="2.5" stroke-linecap="round" opacity="0.35">
+      <line x1="130" y1="108" x2="130" y2="78"/>
+      <line x1="149" y1="119" x2="173" y2="104"/>
+      <line x1="149" y1="141" x2="173" y2="156"/>
+      <line x1="130" y1="152" x2="130" y2="182"/>
+      <line x1="111" y1="141" x2="87" y2="156"/>
+      <line x1="111" y1="119" x2="87" y2="104"/>
+    </g>
+
+    <!--Inner reel ring -->
+    <circle cx="130" cy="130" r="50" fill="none" stroke="url(#p2_gold_ring)" stroke-width="6" opacity="0.8"/>
+    <circle cx="130" cy="130" r="46" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+    <!--Hub: Ashoka Chakra-inspired center -->
+    <circle cx="130" cy="130" r="30" fill="#0d1b2a"/>
+    <circle cx="130" cy="130" r="30" fill="none" stroke="url(#p2_warm)" stroke-width="3.5"/>
+
+    <!-- 12 Chakra spokes -->
+    <g stroke="#FF9933" stroke-width="1.4" opacity="0.75">
+      <line x1="130" y1="103" x2="130" y2="113"/>
+      <line x1="130" y1="147" x2="130" y2="157"/>
+      <line x1="103" y1="130" x2="113" y2="130"/>
+      <line x1="147" y1="130" x2="157" y2="130"/>
+      <!-- Diagonals -->
+      <line x1="111" y1="111" x2="118" y2="118"/>
+      <line x1="142" y1="142" x2="149" y2="149"/>
+      <line x1="149" y1="111" x2="142" y2="118"/>
+      <line x1="111" y1="149" x2="118" y2="142"/>
+      <!-- In-between spokes -->
+      <line x1="120" y1="104" x2="123" y2="114"/>
+      <line x1="140" y1="104" x2="137" y2="114"/>
+      <line x1="120" y1="156" x2="123" y2="146"/>
+      <line x1="140" y1="156" x2="137" y2="146"/>
+    </g>
+
+    <!-- Center dot -->
+    <circle cx="130" cy="130" r="8" fill="url(#p2_warm)" opacity="0.85"/>
+    <circle cx="130" cy="130" r="4" fill="#FFD54F" opacity="0.6"/>
+
+    <!--Decorative film-tail curving off bottom-right -->
+    <path d="M195 205 Q220 220 218 245 Q216 258 228 258"
+          fill="none" stroke="url(#p2_gold_ring)" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+    <!-- Tiny sprocket dots on the tail -->
+    <circle cx="210" cy="225" r="2.5" fill="#FFD54F" opacity="0.4"/>
+    <circle cx="218" cy="242" r="2.5" fill="#FFD54F" opacity="0.35"/>
+    <circle cx="224" cy="255" r="2" fill="#FFD54F" opacity="0.3"/>
+  </g>
+
+  <!-- ===== WORDMARK ===== -->
+  <g transform="translate(310 30)" filter="url(#p2_shadow)">
+    <text x="0" y="105"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+          font-size="118" font-weight="900"
+          fill="url(#p2_text_main)"
+          letter-spacing="-1">India</text>
+    <text x="6" y="210"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+          font-size="82" font-weight="700"
+          fill="url(#p2_gold_text)"
+          letter-spacing="1">MovieGuide</text>
+    <!-- Tricolor underline -->
+    <line x1="6" y1="222" x2="200" y2="222" stroke="#FF9933" stroke-width="4" stroke-linecap="round"/>
+    <line x1="204" y1="222" x2="394" y2="222" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    <line x1="398" y1="222" x2="580" y2="222" stroke="#138808" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

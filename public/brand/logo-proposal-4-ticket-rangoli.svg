@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logo Proposal 4: "Ticket Rangoli"
+  A stylized movie ticket with rangoli-inspired geometric patterns.
+  Rich purple-to-coral gradient with gold detailing.
+  Emphasizes discovery and celebration of Indian cinema.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 280" role="img" aria-label="IndiaMovieGuide logo proposal 4">
+  <defs>
+    <linearGradient id="p4_coral" x1="0" y1="0" x2="260" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF6F61"/>
+      <stop offset="0.5" stop-color="#E84393"/>
+      <stop offset="1" stop-color="#6C5CE7"/>
+    </linearGradient>
+    <linearGradient id="p4_gold" x1="0" y1="0" x2="260" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFEAA7"/>
+      <stop offset="0.5" stop-color="#FDCB6E"/>
+      <stop offset="1" stop-color="#F39C12"/>
+    </linearGradient>
+    <linearGradient id="p4_text1" x1="300" y1="40" x2="800" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF6F61"/>
+      <stop offset="0.4" stop-color="#E84393"/>
+      <stop offset="1" stop-color="#6C5CE7"/>
+    </linearGradient>
+    <linearGradient id="p4_text2" x1="300" y1="160" x2="900" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFEAA7"/>
+      <stop offset="0.5" stop-color="#FDCB6E"/>
+      <stop offset="1" stop-color="#F39C12"/>
+    </linearGradient>
+    <filter id="p4_shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="p4_ticket_clip">
+      <path d="M35 45 L225 45 L225 105 Q210 115 210 130 Q210 145 225 155 L225 215 L35 215 L35 155 Q50 145 50 130 Q50 115 35 105 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Icon -->
+  <g transform="translate(10 10)" filter="url(#p4_shadow)">
+    <rect x="0" y="0" width="260" height="260" rx="52" fill="#120826"/>
+
+    <!-- Movie ticket shape -->
+    <path d="M35 45 L225 45 L225 105 Q210 115 210 130 Q210 145 225 155 L225 215 L35 215 L35 155 Q50 145 50 130 Q50 115 35 105 Z"
+          fill="url(#p4_coral)" opacity="0.85"/>
+
+    <!-- Dashed perforation line -->
+    <line x1="55" y1="130" x2="205" y2="130"
+          stroke="#FFEAA7" stroke-width="2" stroke-dasharray="8 6" opacity="0.6"/>
+
+    <!-- Rangoli pattern on upper portion -->
+    <g clip-path="url(#p4_ticket_clip)" opacity="0.5">
+      <!-- Central mandala -->
+      <circle cx="130" cy="82" r="28" fill="none" stroke="url(#p4_gold)" stroke-width="2"/>
+      <circle cx="130" cy="82" r="18" fill="none" stroke="url(#p4_gold)" stroke-width="1.5"/>
+      <circle cx="130" cy="82" r="8" fill="url(#p4_gold)" opacity="0.6"/>
+
+      <!-- Diamond shapes -->
+      <polygon points="130,50 145,82 130,114 115,82" fill="none" stroke="url(#p4_gold)" stroke-width="1.5"/>
+      <polygon points="98,82 130,67 162,82 130,97" fill="none" stroke="url(#p4_gold)" stroke-width="1.5"/>
+
+      <!-- Corner dots -->
+      <circle cx="80" cy="58" r="4" fill="url(#p4_gold)" opacity="0.7"/>
+      <circle cx="180" cy="58" r="4" fill="url(#p4_gold)" opacity="0.7"/>
+      <circle cx="80" cy="106" r="4" fill="url(#p4_gold)" opacity="0.7"/>
+      <circle cx="180" cy="106" r="4" fill="url(#p4_gold)" opacity="0.7"/>
+
+      <!-- Small petals around mandala -->
+      <circle cx="130" cy="52" r="3" fill="url(#p4_gold)" opacity="0.5"/>
+      <circle cx="160" cy="82" r="3" fill="url(#p4_gold)" opacity="0.5"/>
+      <circle cx="130" cy="112" r="3" fill="url(#p4_gold)" opacity="0.5"/>
+      <circle cx="100" cy="82" r="3" fill="url(#p4_gold)" opacity="0.5"/>
+    </g>
+
+    <!-- Lower ticket: play icon + text hint -->
+    <g transform="translate(130 175)">
+      <!-- Play button -->
+      <circle cx="0" cy="0" r="20" fill="none" stroke="url(#p4_gold)" stroke-width="2.5" opacity="0.8"/>
+      <polygon points="-7,-10 -7,10 11,0" fill="url(#p4_gold)" opacity="0.85"/>
+    </g>
+
+    <!-- "ADMIT ONE" style text -->
+    <text x="130" y="208"
+          font-family="'Courier New', monospace"
+          font-size="9" font-weight="700"
+          fill="url(#p4_gold)" opacity="0.5"
+          text-anchor="middle"
+          letter-spacing="4">DISCOVER</text>
+
+    <!-- Decorative sparkles -->
+    <g fill="#FFEAA7" opacity="0.5">
+      <polygon points="45,30 47,36 53,36 48,40 50,46 45,42 40,46 42,40 37,36 43,36" transform="scale(0.7)"/>
+      <polygon points="220,25 222,31 228,31 223,35 225,41 220,37 215,41 217,35 212,31 218,31" transform="scale(0.6) translate(120 10)"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(310 30)" filter="url(#p4_shadow)">
+    <text x="0" y="105"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+          font-size="118" font-weight="800"
+          fill="url(#p4_text1)"
+          letter-spacing="-2">India</text>
+    <text x="6" y="210"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+          font-size="82" font-weight="700"
+          fill="url(#p4_text2)"
+          letter-spacing="1">MovieGuide</text>
+    <!-- Sparkle dots -->
+    <circle cx="590" cy="100" r="5" fill="#FF6F61" opacity="0.6"/>
+    <circle cx="600" cy="90" r="3" fill="#FDCB6E" opacity="0.5"/>
+    <circle cx="608" cy="100" r="4" fill="#6C5CE7" opacity="0.5"/>
+  </g>
+</svg>

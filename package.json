@@ -1,0 +1,37 @@
+{
+  "name": "indianmovieguide",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx --max-warnings=0",
+    "agent:run": "tsx agent/index.ts",
+    "agent:ingest": "tsx agent/index.ts",
+    "server:dev": "node server/index.js",
+    "server:start": "node server/index.js",
+    "start": "node server/index.js",
+    "db:seed": "node server/seed.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.7.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.1.4"
+  }
+}
