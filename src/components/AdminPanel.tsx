@@ -126,6 +126,8 @@ export function AdminPanel({
   const [tab, setTab] = useState<'overview' | 'seeding' | 'catalog' | 'moderation' | 'ingestion'>('overview');
   const [seedLang, setSeedLang] = useState<string>('Hindi');
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
+  const [movieSearchQuery, setMovieSearchQuery] = useState('');
+  const [movieSearchResults, setMovieSearchResults] = useState<any[]>([]);
   const [editorQuery, setEditorQuery] = useState('');
   const [editor, setEditor] = useState<AdminMovieEditorPayload | null>(null);
   const [movieForm, setMovieForm] = useState({
@@ -144,6 +146,7 @@ export function AdminPanel({
   const [personQuery, setPersonQuery] = useState('');
   const [personResults, setPersonResults] = useState<any[]>([]);
   const [castAdd, setCastAdd] = useState({ personId: '', character: '', billingOrder: '' });
+  const [castDrafts, setCastDrafts] = useState<Record<string, { character: string; billingOrder: string }>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -155,6 +158,7 @@ export function AdminPanel({
     try {
       const data = (await getJson(`/api/admin/movies/${encodeURIComponent(rawMovieId)}`, t)) as AdminMovieEditorPayload;
       setEditor(data);
+      setMovieSearchResults([]);
       const m: any = (data as any).movie || {};
       setMovieForm({
         title: String(m.title || ''),
@@ -175,6 +179,14 @@ export function AdminPanel({
         };
       }
       setSongDrafts(drafts);
+      const cd: Record<string, { character: string; billingOrder: string }> = {};
+      for (const c of (data.cast || []) as any[]) {
+        cd[String(c.personId)] = {
+          character: String(c.character || ''),
+          billingOrder: c.billingOrder != null ? String(c.billingOrder) : ''
+        };
+      }
+      setCastDrafts(cd);
     } catch (e: any) {
       setError(e?.message || 'Failed to load movie editor');
     } finally {
@@ -584,6 +596,89 @@ export function AdminPanel({
                 <div className="tagline">
                   Manage local catalog data. Edits are saved to SQLite and won&apos;t be overwritten by auto-enrichment.
                 </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div className="tagline">Search movies by title (local DB)</div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                    <input
+                      className="input"
+                      value={movieSearchQuery}
+                      onChange={(e) => setMovieSearchQuery(e.target.value)}
+                      placeholder="e.g. Baahubali, KGF, RRR…"
+                      style={{ minWidth: 260, flex: '1 1 260px' }}
+                    />
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={async () => {
+                        if (!token) return;
+                        const q = movieSearchQuery.trim();
+                        if (!q) return;
+                        setLoading(true);
+                        setError(null);
+                        try {
+                          const r = await getJson(`/api/admin/movies/search?q=${encodeURIComponent(q)}`, token);
+                          setMovieSearchResults(Array.isArray((r as any)?.movies) ? (r as any).movies : []);
+                        } catch (e: any) {
+                          setError(e?.message || 'Search failed');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                    >
+                      Search
+                    </button>
+                  </div>
+
+                  {movieSearchResults.length ? (
+                    <div className="song-list" style={{ marginTop: 10 }}>
+                      {movieSearchResults.slice(0, 30).map((m) => (
+                        <div key={m.id} className="song" style={{ alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr', gap: 12, flex: 1 }}>
+                            {m.poster ? (
+                              <img
+                                src={m.poster}
+                                alt=""
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  borderRadius: 12,
+                                  objectFit: 'cover',
+                                  border: '1px solid rgba(255,255,255,0.10)'
+                                }}
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="chip" style={{ width: 44, height: 44, borderRadius: 12 }} />
+                            )}
+                            <div>
+                              <strong>{m.title}</strong>
+                              <div className="tagline" style={{ marginTop: 4 }}>
+                                {(m.language ? m.language : 'Unknown') +
+                                  (m.releaseDate ? ` · ${m.releaseDate}` : '') +
+                                  (m.tmdbId ? ` · tmdb:${m.tmdbId}` : '')}
+                              </div>
+                              <div className="tagline" style={{ marginTop: 4 }}>{m.id}</div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={async () => {
+                                if (!token) return;
+                                await loadEditor(token, String(m.id));
+                              }}
+                            >
+                              Load
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
                   <input
                     className="input"
@@ -783,6 +878,12 @@ export function AdminPanel({
                         <div className="song-list" style={{ marginTop: 10 }}>
                           {(editor.cast || []).slice(0, 60).map((c) => (
                             <div key={c.personId} className="song" style={{ alignItems: 'flex-start', gap: 12 }}>
+                              {(() => {
+                                const d = castDrafts[c.personId] || {
+                                  character: String(c.character || ''),
+                                  billingOrder: c.billingOrder != null ? String(c.billingOrder) : ''
+                                };
+                                return (
                               <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr', gap: 12, flex: 1 }}>
                                 {c.profileImage ? (
                                   <img
@@ -803,14 +904,62 @@ export function AdminPanel({
                                 <div>
                                   <strong>{c.name}</strong>
                                   <div className="tagline" style={{ marginTop: 4 }}>
-                                    {c.character ? `as ${c.character}` : 'Cast member'}
-                                  </div>
-                                  <div className="tagline" style={{ marginTop: 4 }}>
                                     {c.tmdbId ? `tmdb:${c.tmdbId}` : c.personId}
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px', gap: 8, marginTop: 8 }}>
+                                    <input
+                                      className="input"
+                                      value={d.character}
+                                      onChange={(e) =>
+                                        setCastDrafts((p) => ({
+                                          ...p,
+                                          [c.personId]: { ...d, character: e.target.value }
+                                        }))
+                                      }
+                                      placeholder="Character (optional)"
+                                    />
+                                    <input
+                                      className="input"
+                                      value={d.billingOrder}
+                                      onChange={(e) =>
+                                        setCastDrafts((p) => ({
+                                          ...p,
+                                          [c.personId]: { ...d, billingOrder: e.target.value }
+                                        }))
+                                      }
+                                      placeholder="Order"
+                                      inputMode="numeric"
+                                    />
                                   </div>
                                 </div>
                               </div>
+                                );
+                              })()}
                               <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  className="ghost-button"
+                                  type="button"
+                                  onClick={async () => {
+                                    if (!token || !editor?.movieId) return;
+                                    const d = castDrafts[c.personId] || {
+                                      character: String(c.character || ''),
+                                      billingOrder: c.billingOrder != null ? String(c.billingOrder) : ''
+                                    };
+                                    const billingOrder = d.billingOrder.trim() ? Number(d.billingOrder) : undefined;
+                                    await postJson(
+                                      `/api/admin/movies/${encodeURIComponent(editor.movieId)}/cast/add`,
+                                      {
+                                        personId: c.personId,
+                                        character: d.character,
+                                        billingOrder: Number.isFinite(billingOrder as any) ? billingOrder : undefined
+                                      },
+                                      token
+                                    );
+                                    await loadEditor(token, editor.movieId);
+                                  }}
+                                >
+                                  Save
+                                </button>
                                 <button
                                   className="ghost-button"
                                   type="button"
@@ -859,6 +1008,29 @@ export function AdminPanel({
                           >
                             Search
                           </button>
+                        </div>
+
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                            gap: 10,
+                            marginTop: 10
+                          }}
+                        >
+                          <input
+                            className="input"
+                            value={castAdd.character}
+                            onChange={(e) => setCastAdd((p) => ({ ...p, character: e.target.value }))}
+                            placeholder="Character (optional)"
+                          />
+                          <input
+                            className="input"
+                            value={castAdd.billingOrder}
+                            onChange={(e) => setCastAdd((p) => ({ ...p, billingOrder: e.target.value }))}
+                            placeholder="Billing order (optional number)"
+                            inputMode="numeric"
+                          />
                         </div>
 
                         {personResults.length ? (
@@ -921,18 +1093,6 @@ export function AdminPanel({
                             value={castAdd.personId}
                             onChange={(e) => setCastAdd((p) => ({ ...p, personId: e.target.value }))}
                             placeholder="Or paste person id (optional)"
-                          />
-                          <input
-                            className="input"
-                            value={castAdd.character}
-                            onChange={(e) => setCastAdd((p) => ({ ...p, character: e.target.value }))}
-                            placeholder="Character (optional)"
-                          />
-                          <input
-                            className="input"
-                            value={castAdd.billingOrder}
-                            onChange={(e) => setCastAdd((p) => ({ ...p, billingOrder: e.target.value }))}
-                            placeholder="Billing order (optional number)"
                           />
                         </div>
                         <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>

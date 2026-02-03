@@ -2352,6 +2352,59 @@ app.get('/api/admin/persons/search', (req, res) => {
   res.json({ persons });
 });
 
+app.get('/api/admin/movies/search', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const q = String(req.query.q || '').trim().slice(0, 100);
+  if (!q) return res.json({ movies: [] });
+
+  // If the user pastes an id, return a direct hit.
+  const asId = normalizeMovieIdInput(q);
+  const direct = db
+    .prepare('SELECT id, tmdb_id, title, language, release_date, poster FROM movies WHERE id = ? LIMIT 1')
+    .get(asId);
+  if (direct) {
+    return res.json({
+      movies: [
+        {
+          id: direct.id,
+          tmdbId: direct.tmdb_id || undefined,
+          title: direct.title,
+          language: direct.language || '',
+          releaseDate: direct.release_date || '',
+          poster: direct.poster || ''
+        }
+      ]
+    });
+  }
+
+  const needle = `%${q.toLowerCase()}%`;
+  const rows = db
+    .prepare(
+      `
+      SELECT id, tmdb_id, title, language, release_date, poster
+      FROM movies
+      WHERE COALESCE(is_indian, 1) = 1
+        AND lower(title) LIKE ?
+      ORDER BY COALESCE(release_date, '0000-00-00') DESC, title ASC
+      LIMIT 30
+    `
+    )
+    .all(needle);
+
+  res.json({
+    movies: rows.map((m) => ({
+      id: m.id,
+      tmdbId: m.tmdb_id || undefined,
+      title: m.title,
+      language: m.language || '',
+      releaseDate: m.release_date || '',
+      poster: m.poster || ''
+    }))
+  });
+});
+
 app.post('/api/admin/movies/:id/cast/add', async (req, res) => {
   const token = requireAdmin(req, res);
   if (!token) return;
