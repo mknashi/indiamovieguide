@@ -75,12 +75,46 @@ export default function App() {
   return (
     <div className="app-shell">
       <nav className="nav">
-        <div className="brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-          <img className="brand-logo" src="/brand/india-movie-guide-option2.svg" alt="IndiaMovieGuide" />
-          <span className="sr-only">IndiaMovieGuide</span>
+        <div className="nav-top">
+          <div className="brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
+            <img className="brand-logo" src="/brand/india-movie-guide-option2.svg" alt="IndiaMovieGuide" />
+            <span className="sr-only">IndiaMovieGuide</span>
+          </div>
+
+          <div className="nav-top-actions">
+            <button
+              className={`icon-button ${route.name === 'search' ? 'active' : ''}`}
+              type="button"
+              onClick={() => navigate('/search')}
+              title="Search"
+              aria-label="Search"
+            >
+              <RiSearchLine size={18} />
+            </button>
+
+            <button
+              className={`icon-button ${route.name === 'account' || route.name === 'login' ? 'active' : ''}`}
+              type="button"
+              onClick={() => navigate(me ? '/account' : '/login')}
+              title={me ? 'Account' : 'Login'}
+              aria-label={me ? 'Account' : 'Login'}
+            >
+              {me?.avatarUrl ? (
+                <img
+                  src={me.avatarUrl}
+                  alt="Profile"
+                  className="nav-avatar"
+                />
+              ) : me ? (
+                <span className="nav-initials">{initials}</span>
+              ) : (
+                <RiUser3Line size={18} />
+              )}
+            </button>
+          </div>
         </div>
 
-        <div className="nav-actions">
+        <div className="nav-bottom">
           <div className="filters">
             {LANG_ORDER.map((l) => (
               <button
@@ -97,57 +131,6 @@ export default function App() {
               </button>
             ))}
           </div>
-
-          <button
-            className={`ghost-button ${route.name === 'search' ? 'active' : ''}`}
-            type="button"
-            onClick={() => navigate('/search')}
-            title="Search"
-          >
-            <span style={{marginRight: 8, display: 'inline-flex', alignItems: 'center'}}><RiSearchLine  /></span>
-            Search
-          </button>
-
-          <button
-            className={`ghost-button ${route.name === 'account' || route.name === 'login' ? 'active' : ''}`}
-            type="button"
-            onClick={() => navigate(me ? '/account' : '/login')}
-            title={me ? 'Account' : 'Login'}
-          >
-            {me?.avatarUrl ? (
-              <img
-                src={me.avatarUrl}
-                alt="Profile"
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  objectFit: 'cover',
-                  marginRight: 8,
-                  verticalAlign: 'text-bottom',
-                  border: '1px solid rgba(255,255,255,0.14)'
-                }}
-              />
-            ) : me ? (
-              <span
-                className="chip"
-                style={{
-                  padding: '4px 8px',
-                  marginRight: 8,
-                  borderRadius: 999,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}
-              >
-                <RiUser3Line size={13} />
-                {initials}
-              </span>
-            ) : (
-              <span style={{marginRight: 8, display: 'inline-flex', alignItems: 'center'}}><RiUser3Line  /></span>
-            )}
-            {me ? 'Account' : 'Login'}
-          </button>
         </div>
       </nav>
 

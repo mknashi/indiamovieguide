@@ -58,14 +58,70 @@ a {
 
 .nav {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
   padding: 14px 18px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
   backdrop-filter: blur(14px);
+}
+
+.nav-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nav-top-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.icon-button {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-button.active {
+  border-color: rgba(243, 167, 18, 0.55);
+  background: rgba(243, 167, 18, 0.12);
+}
+
+.nav-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.nav-initials {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.4px;
 }
 
 .brand {
@@ -95,23 +151,14 @@ a {
   border: 0;
 }
 
-.nav-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.nav-actions .ghost-button {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
 @media (max-width: 560px) {
   .brand-logo {
     height: 38px;
+  }
+  .icon-button {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
   }
 }
 
@@ -589,16 +636,6 @@ button.detail {
   .hero {
     grid-template-columns: 1fr;
   }
-  .nav {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .nav-actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-start;
-  }
   .filters {
     width: 100%;
     justify-content: flex-start;
@@ -610,10 +647,6 @@ button.detail {
   .filter {
     flex: 0 0 auto;
     white-space: nowrap;
-  }
-  .nav-actions .ghost-button {
-    width: 100%;
-    justify-content: center;
   }
 }
 
