@@ -46,11 +46,16 @@ export function CaptchaWidget({
 }) {
   const sitekey = (import.meta as any).env?.VITE_RECAPTCHA_SITEKEY as string | undefined;
   const ref = useRef<HTMLDivElement | null>(null);
+  const onTokenRef = useRef(onToken);
+  const widgetIdRef = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    onTokenRef.current = onToken;
+  }, [onToken]);
+
+  useEffect(() => {
     let alive = true;
-    let widgetId: number | null = null;
 
     (async () => {
       if (!sitekey) return;
@@ -59,15 +64,23 @@ export function CaptchaWidget({
         if (!alive) return;
         if (!ref.current || !window.grecaptcha) return;
 
-        // Ensure we don't double-render into the same node.
-        ref.current.innerHTML = '';
-        widgetId = window.grecaptcha.render(ref.current, {
+        // React state updates can cause parent re-renders; avoid double-rendering the same widget.
+        if (widgetIdRef.current != null) return;
+
+        // Ensure we don't double-render into the same node (helps in some browsers).
+        try {
+          ref.current.innerHTML = '';
+        } catch {
+          // ignore
+        }
+
+        widgetIdRef.current = window.grecaptcha.render(ref.current, {
           sitekey,
           theme: 'dark',
           size: compact ? 'compact' : 'normal',
-          callback: (t: string) => onToken(String(t || '')),
-          'expired-callback': () => onToken(''),
-          'error-callback': () => onToken('')
+          callback: (t: string) => onTokenRef.current(String(t || '')),
+          'expired-callback': () => onTokenRef.current(''),
+          'error-callback': () => onTokenRef.current('')
         });
       } catch (e: any) {
         if (alive) setError(e?.message || 'Captcha failed to load');
@@ -77,7 +90,7 @@ export function CaptchaWidget({
     return () => {
       alive = false;
       try {
-        if (widgetId != null && window.grecaptcha) window.grecaptcha.reset(widgetId);
+        if (widgetIdRef.current != null && window.grecaptcha) window.grecaptcha.reset(widgetIdRef.current);
       } catch {
         // ignore
       }
@@ -86,8 +99,9 @@ export function CaptchaWidget({
       } catch {
         // ignore
       }
+      widgetIdRef.current = null;
     };
-  }, [sitekey, compact, onToken]);
+  }, [sitekey, compact]);
 
   if (!sitekey) {
     // In local dev, set CAPTCHA_BYPASS=1 on the server.
@@ -100,9 +114,10 @@ export function CaptchaWidget({
 
   return (
     <div>
-      <div ref={ref} />
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div ref={ref} />
+      </div>
       {error ? <div className="tagline" style={{ marginTop: 8 }}>Captcha error: {error}</div> : null}
     </div>
   );
 }
-

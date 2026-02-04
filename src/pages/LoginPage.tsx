@@ -91,7 +91,7 @@ export function LoginPage({ next }: { next?: string }) {
           <h4>Captcha</h4>
           <div className="tagline">Required for account actions.</div>
           <div style={{ marginTop: 10 }}>
-            <CaptchaWidget onToken={(t) => setCaptchaToken(t)} compact />
+            <CaptchaWidget onToken={(t) => setCaptchaToken(t)} />
           </div>
         </div>
 

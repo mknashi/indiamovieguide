@@ -188,7 +188,7 @@ export function MovieReviewsPage({ id }: { id: string }) {
               <h4>Captcha</h4>
               <div className="tagline">Required for submitting reviews.</div>
               <div style={{ marginTop: 10 }}>
-                <CaptchaWidget onToken={(t) => setCaptchaToken(t)} compact />
+                <CaptchaWidget onToken={(t) => setCaptchaToken(t)} />
               </div>
             </div>
 
@@ -260,4 +260,3 @@ export function MovieReviewsPage({ id }: { id: string }) {
     </div>
   );
 }
-

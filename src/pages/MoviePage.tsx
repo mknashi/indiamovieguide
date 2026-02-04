@@ -250,7 +250,7 @@ export function MoviePage({ id }: { id: string }) {
                       Human check (required for favorites/watchlist)${captchaToken ? ' · Verified' : ''}
                     </summary>
                     <div style={{ marginTop: 10 }}>
-                      <CaptchaWidget onToken={(t) => setCaptchaToken(t)} compact />
+                      <CaptchaWidget onToken={(t) => setCaptchaToken(t)} />
                     </div>
                     {actionMsg ? <div className="tagline" style={{ marginTop: 10 }}>{actionMsg}</div> : null}
                   </details>
