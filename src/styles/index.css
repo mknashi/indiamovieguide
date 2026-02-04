@@ -659,17 +659,25 @@ button.detail {
   .nav-top-actions {
     flex-wrap: nowrap;
   }
+  .nav-bottom {
+    min-width: 0; /* allow the scroll container to shrink in flex layouts (Android Chrome) */
+  }
   .filters {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: nowrap;
     overflow-x: auto;
+    max-width: 100%;
+    min-width: 0;
     padding-bottom: 6px;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
   }
   .filter {
     flex: 0 0 auto;
     white-space: nowrap;
+    touch-action: pan-x;
   }
 }
 
