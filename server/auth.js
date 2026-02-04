@@ -124,7 +124,22 @@ export async function verifyCaptcha({ token, ip } = {}) {
   const t = String(token || '').trim();
   if (!t) return { ok: false, error: 'missing_captcha' };
 
-  // Prefer hCaptcha if configured.
+  // Prefer reCAPTCHA if configured.
+  const rSecret = String(process.env.RECAPTCHA_SECRET || '').trim();
+  if (rSecret) {
+    const body = new URLSearchParams();
+    body.set('secret', rSecret);
+    body.set('response', t);
+    if (ip) body.set('remoteip', String(ip));
+    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: !!data.success, provider: 'recaptcha', raw: data };
+  }
+
   const hSecret = String(process.env.HCAPTCHA_SECRET || '').trim();
   if (hSecret) {
     const body = new URLSearchParams();
@@ -139,21 +154,6 @@ export async function verifyCaptcha({ token, ip } = {}) {
     });
     const data = await res.json().catch(() => ({}));
     return { ok: !!data.success, provider: 'hcaptcha', raw: data };
-  }
-
-  const rSecret = String(process.env.RECAPTCHA_SECRET || '').trim();
-  if (rSecret) {
-    const body = new URLSearchParams();
-    body.set('secret', rSecret);
-    body.set('response', t);
-    if (ip) body.set('remoteip', String(ip));
-    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: !!data.success, provider: 'recaptcha', raw: data };
   }
 
   // No captcha configured: treat as failure to avoid accidental unguarded writes in prod.
@@ -200,4 +200,3 @@ export function consumePasswordReset(db, email, token) {
   db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(nowIso(), row.id);
   return { ok: true, userId: row.user_id };
 }
-
