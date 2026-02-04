@@ -1,4 +1,13 @@
-import { INDIAN_LANGUAGES_LOWER, hashId, makeId, nowIso, soundex, statusFrom, toIsoDate } from '../repo.js';
+import {
+  INDIAN_LANGUAGES_LOWER,
+  hashId,
+  makeId,
+  normalizeForSearch,
+  nowIso,
+  soundex,
+  statusFrom,
+  toIsoDate
+} from '../repo.js';
 
 export function upsertMovieFromTmdb(db, tmdbMovie) {
   const id = makeId('tmdb-movie', tmdbMovie.tmdbId);
@@ -8,6 +17,7 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
   const hasStreaming = (tmdbMovie.offers || []).some((o) => o.type === 'Streaming');
   const status = statusFrom(releaseDate, hasStreaming);
   const titleSoundex = soundex(tmdbMovie.title);
+  const titleNorm = normalizeForSearch(tmdbMovie.title);
   const productionCountriesJson = JSON.stringify(tmdbMovie.productionCountries || []);
   const isIndian =
     Array.isArray(tmdbMovie.productionCountries) && tmdbMovie.productionCountries.includes('IN')
@@ -19,14 +29,15 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
   db.prepare(
     `
     INSERT INTO movies (
-      id, tmdb_id, title, title_soundex, language, is_indian, production_countries_json, synopsis, director, release_date, status,
+      id, tmdb_id, title, title_soundex, title_norm, language, is_indian, production_countries_json, synopsis, director, release_date, status,
       poster, backdrop, trailer_url, created_at, updated_at
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       title=excluded.title,
       title_soundex=excluded.title_soundex,
+      title_norm=excluded.title_norm,
       language=excluded.language,
       is_indian=excluded.is_indian,
       production_countries_json=excluded.production_countries_json,
@@ -44,6 +55,7 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
     tmdbMovie.tmdbId,
     tmdbMovie.title,
     titleSoundex,
+    titleNorm,
     tmdbMovie.language,
     isIndian,
     productionCountriesJson,

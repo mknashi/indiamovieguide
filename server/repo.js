@@ -43,6 +43,13 @@ export function statusFrom(releaseDate, hasStreaming) {
   return 'Now Showing';
 }
 
+// Normalization for fuzzy searches. Keeps only lowercase a-z/0-9.
+export function normalizeForSearch(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
 // Basic Soundex (good enough for "sounds like" across English transliterations).
 export function soundex(input) {
   const s = String(input || '')

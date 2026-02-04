@@ -33,7 +33,7 @@ import {
   wikipediaSummaryByTitle
 } from './providers/wikipedia.js';
 import { itunesFindSoundtrackForMovie } from './providers/itunes.js';
-import { hashId, INDIAN_LANGUAGES_LOWER, makeId, nowIso, soundex, statusFrom, toIsoDate } from './repo.js';
+import { hashId, INDIAN_LANGUAGES_LOWER, makeId, normalizeForSearch, nowIso, soundex, statusFrom, toIsoDate } from './repo.js';
 import { omdbByTitle } from './providers/omdb.js';
 import {
   clearSessionCookie,
@@ -2275,12 +2275,16 @@ app.post('/api/admin/movies/:id/update', (req, res) => {
   const trailerUrl = pick('trailerUrl', 400);
   const poster = pick('poster', 400);
   const backdrop = pick('backdrop', 400);
+  const titleSoundex = title != null ? soundex(title) : null;
+  const titleNorm = title != null ? normalizeForSearch(title) : null;
 
   const ts = nowIso();
   db.prepare(
     `
     UPDATE movies SET
       title = CASE WHEN ? IS NULL THEN title ELSE ? END,
+      title_soundex = CASE WHEN ? IS NULL THEN title_soundex ELSE ? END,
+      title_norm = CASE WHEN ? IS NULL THEN title_norm ELSE ? END,
       language = CASE WHEN ? IS NULL THEN language ELSE ? END,
       synopsis = CASE WHEN ? IS NULL THEN synopsis ELSE ? END,
       director = CASE WHEN ? IS NULL THEN director ELSE ? END,
@@ -2294,6 +2298,8 @@ app.post('/api/admin/movies/:id/update', (req, res) => {
   `
   ).run(
     title, title,
+    titleSoundex, titleSoundex,
+    titleNorm, titleNorm,
     language, language,
     synopsis, synopsis,
     director, director,
@@ -2380,19 +2386,68 @@ app.get('/api/admin/movies-search', (req, res) => {
     });
   }
 
-  const needle = `%${q.toLowerCase()}%`;
+  const qLower = q.toLowerCase();
+  const needle = `%${qLower}%`;
+  const qNorm = normalizeForSearch(q);
+  const normNeedle = qNorm ? `%${qNorm}%` : '';
+  const sx = soundex(q);
+
+  const normTokens = qLower
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((t) => normalizeForSearch(t))
+    .filter(Boolean);
+  const useTokenAnd = normTokens.length >= 2;
+  const tokenConds = useTokenAnd ? normTokens.map(() => 'title_norm LIKE ?').join(' AND ') : '';
+  const tokenParams = useTokenAnd ? normTokens.map((t) => `%${t}%`) : [];
+
+  const whereClauses = ['lower(title) LIKE ?'];
+  const whereParams = [needle];
+  if (qNorm) {
+    whereClauses.push('title_norm LIKE ?');
+    whereParams.push(normNeedle);
+  }
+  if (sx) {
+    whereClauses.push('title_soundex = ?');
+    whereParams.push(sx);
+  }
+  if (useTokenAnd) {
+    whereClauses.push(`(${tokenConds})`);
+    whereParams.push(...tokenParams);
+  }
+
+  const caseParts = ['WHEN lower(title) = ? THEN 100', 'WHEN lower(title) LIKE ? THEN 90'];
+  const caseParams = [qLower, needle];
+  if (qNorm) {
+    caseParts.push('WHEN title_norm = ? THEN 95');
+    caseParams.push(qNorm);
+    caseParts.push('WHEN title_norm LIKE ? THEN 85');
+    caseParams.push(normNeedle);
+  }
+  if (useTokenAnd) {
+    caseParts.push(`WHEN (${tokenConds}) THEN 88`);
+    caseParams.push(...tokenParams);
+  }
+  if (sx) {
+    caseParts.push('WHEN title_soundex = ? THEN 70');
+    caseParams.push(sx);
+  }
+  caseParts.push('ELSE 0');
+
   const rows = db
     .prepare(
       `
-      SELECT id, tmdb_id, title, language, release_date, poster
+      SELECT id, tmdb_id, title, language, release_date, poster,
+        CASE ${caseParts.join(' ')} END AS score
       FROM movies
       WHERE COALESCE(is_indian, 1) = 1
-        AND lower(title) LIKE ?
-      ORDER BY COALESCE(release_date, '0000-00-00') DESC, title ASC
+        AND (${whereClauses.join(' OR ')})
+      ORDER BY score DESC, COALESCE(release_date, '0000-00-00') DESC, title ASC
       LIMIT 30
     `
     )
-    .all(needle);
+    .all(...caseParams, ...whereParams);
 
   res.json({
     movies: rows.map((m) => ({

@@ -151,40 +151,42 @@ export default function App() {
         </div>
       </nav>
 
-      {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
-      {route.name === 'search' && <SearchPage q={route.q} />}
-      {route.name === 'movie' && <MoviePage id={route.id} />}
-      {route.name === 'movie_reviews' && <MovieReviewsPage id={route.id} />}
-      {route.name === 'trailer' && <TrailerPage id={route.id} />}
-      {route.name === 'song' && <SongPage id={route.id} />}
-      {route.name === 'person' && <PersonPage id={route.id} />}
-      {route.name === 'login' && <LoginPage next={route.next} />}
-      {route.name === 'account' && <AccountPage />}
-      {route.name === 'submit' && <SubmitPage />}
-      {route.name === 'about' && <AboutPage />}
-      {route.name === 'contact' && <ContactPage />}
-      {route.name === 'feedback' && <FeedbackPage />}
-      {route.name === 'privacy' && <PrivacyPage />}
-      {route.name === 'admin' && <AdminPage />}
-      {route.name === 'not_found' && (
-        <div className="detail" style={{ marginTop: 18 }}>
-          <h4>Not found</h4>
-          <div className="tagline">
-            This page doesn’t exist.{' '}
-            <a
-              href="/"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate('/');
-              }}
-              style={{ textDecoration: 'underline' }}
-            >
-              Go home
-            </a>
-            .
+      <main className="app-main">
+        {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
+        {route.name === 'search' && <SearchPage q={route.q} />}
+        {route.name === 'movie' && <MoviePage id={route.id} />}
+        {route.name === 'movie_reviews' && <MovieReviewsPage id={route.id} />}
+        {route.name === 'trailer' && <TrailerPage id={route.id} />}
+        {route.name === 'song' && <SongPage id={route.id} />}
+        {route.name === 'person' && <PersonPage id={route.id} />}
+        {route.name === 'login' && <LoginPage next={route.next} />}
+        {route.name === 'account' && <AccountPage />}
+        {route.name === 'submit' && <SubmitPage />}
+        {route.name === 'about' && <AboutPage />}
+        {route.name === 'contact' && <ContactPage />}
+        {route.name === 'feedback' && <FeedbackPage />}
+        {route.name === 'privacy' && <PrivacyPage />}
+        {route.name === 'admin' && <AdminPage />}
+        {route.name === 'not_found' && (
+          <div className="detail" style={{ marginTop: 18 }}>
+            <h4>Not found</h4>
+            <div className="tagline">
+              This page doesn’t exist.{' '}
+              <a
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/');
+                }}
+                style={{ textDecoration: 'underline' }}
+              >
+                Go home
+              </a>
+              .
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </main>
 
       <footer className="footer">
         <div className="footer-links">

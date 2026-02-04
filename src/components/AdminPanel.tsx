@@ -91,6 +91,19 @@ type ModerationQueue = {
   }[];
 };
 
+const ADMIN_LANGUAGE_OPTIONS = [
+  'Hindi',
+  'Kannada',
+  'Telugu',
+  'Tamil',
+  'Malayalam',
+  'Marathi',
+  'Bengali',
+  'Punjabi'
+];
+
+const ADMIN_STATUS_OPTIONS = ['Now Showing', 'Streaming', 'Upcoming', 'Announced'];
+
 async function postJson(url: string, body: any, token?: string) {
   const res = await fetch(url, {
     method: 'POST',
@@ -598,7 +611,7 @@ export function AdminPanel({
                 </div>
 
                 <div style={{ marginTop: 12 }}>
-                  <div className="tagline">Search movies by title (local DB)</div>
+                  <div className="tagline">Search movies by title (local DB; supports punctuation/“sounds like” matching)</div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
                     <input
                       className="input"
@@ -718,19 +731,68 @@ export function AdminPanel({
                     <div className="detail" style={{ marginTop: 14 }}>
                       <h4 style={{ marginTop: 0 }}>Movie</h4>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                        <input className="input" value={movieForm.title} onChange={(e) => setMovieForm((p) => ({ ...p, title: e.target.value }))} placeholder="Title" />
-                        <input className="input" value={movieForm.language} onChange={(e) => setMovieForm((p) => ({ ...p, language: e.target.value }))} placeholder="Language" />
-                        <input className="input" value={movieForm.releaseDate} onChange={(e) => setMovieForm((p) => ({ ...p, releaseDate: e.target.value }))} placeholder="Release date (YYYY-MM-DD)" />
-                        <input className="input" value={movieForm.status} onChange={(e) => setMovieForm((p) => ({ ...p, status: e.target.value }))} placeholder="Status" />
-                        <input className="input" value={movieForm.director} onChange={(e) => setMovieForm((p) => ({ ...p, director: e.target.value }))} placeholder="Director" />
-                        <input className="input" value={movieForm.trailerUrl} onChange={(e) => setMovieForm((p) => ({ ...p, trailerUrl: e.target.value }))} placeholder="Trailer URL" />
+                        <input
+                          className="input"
+                          value={movieForm.title}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, title: e.target.value }))}
+                          placeholder="Title"
+                        />
+                        <select
+                          className="input"
+                          value={movieForm.language}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, language: e.target.value }))}
+                          title="Language"
+                        >
+                          <option value="">Language (unknown)</option>
+                          {ADMIN_LANGUAGE_OPTIONS.map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                          {movieForm.language && !ADMIN_LANGUAGE_OPTIONS.includes(movieForm.language) ? (
+                            <option value={movieForm.language}>{movieForm.language}</option>
+                          ) : null}
+                        </select>
+                        <input
+                          className="input"
+                          type="date"
+                          value={movieForm.releaseDate}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, releaseDate: e.target.value }))}
+                          placeholder="Release date"
+                        />
+                        <select
+                          className="input"
+                          value={movieForm.status}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, status: e.target.value }))}
+                          title="Status"
+                        >
+                          <option value="">Status (auto)</option>
+                          {ADMIN_STATUS_OPTIONS.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="input"
+                          value={movieForm.director}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, director: e.target.value }))}
+                          placeholder="Director"
+                        />
+                        <input
+                          className="input"
+                          value={movieForm.trailerUrl}
+                          onChange={(e) => setMovieForm((p) => ({ ...p, trailerUrl: e.target.value }))}
+                          placeholder="Trailer URL"
+                        />
                       </div>
                       <textarea
                         className="input"
                         value={movieForm.synopsis}
                         onChange={(e) => setMovieForm((p) => ({ ...p, synopsis: e.target.value }))}
                         placeholder="Synopsis"
-                        style={{ marginTop: 10, minHeight: 110, resize: 'vertical' }}
+                        rows={8}
+                        style={{ marginTop: 10, minHeight: 220, resize: 'vertical' }}
                       />
                       <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
                         <button

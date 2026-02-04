@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { INDIAN_LANGUAGES_LOWER, soundex } from '../repo.js';
+import { INDIAN_LANGUAGES_LOWER, normalizeForSearch, soundex } from '../repo.js';
 
 const DEFAULT_DB_PATH = path.join(process.cwd(), '.cache', 'indiamovieguide.sqlite');
 const LEGACY_DB_PATH = path.join(process.cwd(), '.cache', 'indianmovieguide.sqlite');
@@ -290,6 +290,9 @@ export function migrate(db) {
   if (!hasColumn('movies', 'title_soundex')) {
     db.exec('ALTER TABLE movies ADD COLUMN title_soundex TEXT');
   }
+  if (!hasColumn('movies', 'title_norm')) {
+    db.exec('ALTER TABLE movies ADD COLUMN title_norm TEXT');
+  }
   if (!hasColumn('movies', 'production_countries_json')) {
     db.exec('ALTER TABLE movies ADD COLUMN production_countries_json TEXT');
   }
@@ -305,6 +308,7 @@ export function migrate(db) {
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_is_indian ON movies(is_indian)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_soundex ON movies(title_soundex)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_norm ON movies(title_norm)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_persons_name_soundex ON persons(name_soundex)');
 
   // Backfill for existing rows so filtering and "sounds-like" search work immediately.
@@ -312,11 +316,15 @@ export function migrate(db) {
     db.exec('BEGIN');
     if (hasColumn('movies', 'title_soundex') && hasColumn('movies', 'is_indian')) {
       const rows = db
-        .prepare('SELECT id, title, language, title_soundex, is_indian, production_countries_json FROM movies')
+        .prepare('SELECT id, title, language, title_soundex, title_norm, is_indian, production_countries_json FROM movies')
         .all();
-      const stmt = db.prepare('UPDATE movies SET title_soundex = ?, is_indian = ? WHERE id = ?');
+      const hasNorm = hasColumn('movies', 'title_norm');
+      const stmt = hasNorm
+        ? db.prepare('UPDATE movies SET title_soundex = ?, title_norm = ?, is_indian = ? WHERE id = ?')
+        : db.prepare('UPDATE movies SET title_soundex = ?, is_indian = ? WHERE id = ?');
       for (const r of rows) {
         const sx = r.title_soundex ? String(r.title_soundex) : '';
+        const norm = r.title_norm ? String(r.title_norm) : '';
         const langLower = String(r.language || '').toLowerCase();
         let prod = [];
         try {
@@ -333,7 +341,11 @@ export function migrate(db) {
 
         // Always set is_indian from the best available signal so we don't accidentally
         // surface non-Indian titles that were cached earlier.
-        stmt.run(sx || soundex(r.title), isIndian, r.id);
+        if (hasNorm) {
+          stmt.run(sx || soundex(r.title), norm || normalizeForSearch(r.title), isIndian, r.id);
+        } else {
+          stmt.run(sx || soundex(r.title), isIndian, r.id);
+        }
       }
     }
 
