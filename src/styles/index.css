@@ -57,11 +57,11 @@ a {
 }
 
 .nav {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "brand filters actions";
+  align-items: center;
+  gap: 12px;
   padding: 14px 18px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -70,10 +70,8 @@ a {
 }
 
 .nav-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  /* Default (desktop): let children participate in the nav grid. */
+  display: contents;
 }
 
 .nav-top-actions {
@@ -82,6 +80,7 @@ a {
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
+  grid-area: actions;
 }
 
 .icon-button {
@@ -130,6 +129,7 @@ a {
   gap: 10px;
   font-weight: 800;
   letter-spacing: 0.2px;
+  grid-area: brand;
 }
 
 .brand-logo {
@@ -265,6 +265,14 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.nav-bottom {
+  grid-area: filters;
+}
+
+.nav-bottom .filters {
+  justify-content: center;
 }
 
 .filter {
@@ -635,6 +643,21 @@ button.detail {
 @media (max-width: 960px) {
   .hero {
     grid-template-columns: 1fr;
+  }
+  .nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .nav-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .nav-top-actions {
+    flex-wrap: nowrap;
   }
   .filters {
     width: 100%;
