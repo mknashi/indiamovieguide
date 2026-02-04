@@ -2352,7 +2352,8 @@ app.get('/api/admin/persons/search', (req, res) => {
   res.json({ persons });
 });
 
-app.get('/api/admin/movies/search', (req, res) => {
+// NOTE: this must not conflict with `/api/admin/movies/:id`, so keep a non-overlapping path.
+app.get('/api/admin/movies-search', (req, res) => {
   const token = requireAdmin(req, res);
   if (!token) return;
 

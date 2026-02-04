@@ -617,7 +617,7 @@ export function AdminPanel({
                         setLoading(true);
                         setError(null);
                         try {
-                          const r = await getJson(`/api/admin/movies/search?q=${encodeURIComponent(q)}`, token);
+                          const r = await getJson(`/api/admin/movies-search?q=${encodeURIComponent(q)}`, token);
                           setMovieSearchResults(Array.isArray((r as any)?.movies) ? (r as any).movies : []);
                         } catch (e: any) {
                           setError(e?.message || 'Search failed');
