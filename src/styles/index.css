@@ -99,6 +99,14 @@ a {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nav-actions .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 @media (max-width: 560px) {
@@ -585,6 +593,28 @@ button.detail {
     flex-direction: column;
     align-items: flex-start;
   }
+  .nav-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .filters {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .filter {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .nav-actions .ghost-button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 640px) {
@@ -604,5 +634,49 @@ button.detail {
   }
   .card {
     height: 640px;
+  }
+}
+
+/* Person page */
+.person-hero-card {
+  padding: 18px;
+}
+
+.person-filmography-card {
+  background: rgba(10, 15, 31, 0.7);
+}
+
+.person-header {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.person-photo {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  object-fit: cover;
+}
+
+.person-filmography-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .person-header {
+    grid-template-columns: 1fr;
+  }
+  .person-photo {
+    max-width: 240px;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .person-filmography-grid {
+    grid-template-columns: 1fr;
   }
 }

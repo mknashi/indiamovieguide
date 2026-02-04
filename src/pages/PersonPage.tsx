@@ -49,18 +49,14 @@ export function PersonPage({ id }: { id: string }) {
 
       {!loading && profile && (
         <>
-          <div className="hero" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
-            <div className="hero-card" style={{ padding: 18 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 16 }}>
+          <div className="hero person-hero">
+            <div className="hero-card person-hero-card">
+              <div className="person-header">
                 {profile.profileImage ? (
                   <img
                     src={profile.profileImage}
                     alt={profile.name}
-                    style={{
-                      width: '100%',
-                      borderRadius: 16,
-                      border: '1px solid rgba(255,255,255,0.08)'
-                    }}
+                    className="person-photo"
                   />
                 ) : (
                   <div className="detail">No image</div>
@@ -99,12 +95,12 @@ export function PersonPage({ id }: { id: string }) {
               </div>
             </div>
 
-            <div className="hero-card" style={{ padding: 18, background: 'rgba(10, 15, 31, 0.7)' }}>
+            <div className="hero-card person-hero-card person-filmography-card">
               <div className="section-header" style={{ marginTop: 0 }}>
                 <h3>Filmography</h3>
                 <span className="inline-pill">{filmography.length} items</span>
               </div>
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <div className="grid person-filmography-grid">
                 {filmography.slice(0, 8).map((f) => (
                   <a
                     key={`${f.title}-${f.releaseDate || ''}`}

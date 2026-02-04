@@ -81,7 +81,7 @@ export default function App() {
         </div>
 
         <div className="nav-actions">
-          <div className="filters" style={{ justifyContent: 'flex-end' }}>
+          <div className="filters">
             {LANG_ORDER.map((l) => (
               <button
                 key={l}
