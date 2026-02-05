@@ -110,6 +110,30 @@ This repo includes a local API server that maintains a SQLite cache and performs
   - `GET /api/person/:id` — cast profile (bio + filmography from TMDB, Wikipedia link/summary when available).
   - `GET /api/movies/:id` — movie details.
 
+### Home/language seeding (server-side env)
+The server keeps the home page fast by reading shelves from SQLite and doing provider refresh in the background.
+If the DB is empty (or a language is sparse), it will seed from TMDB.
+
+These are **backend** environment variables (set them on the Node server / Render Web Service). They are *not* `VITE_*`.
+
+**Home shelf seeding (New/Upcoming)**
+- `HOME_SEED_PAGES` (default `2`, max `5`): how many TMDB discover pages to scan per shelf.
+- `HOME_SEED_MAX_IDS` (default `80`, max `180`): cap on unique TMDB IDs fetched per run.
+- `HOME_SEED_CONCURRENCY` (default `4`, max `8`): parallelism for `tmdbGetMovieFull` fetches.
+- `HOME_SEED_ALL_LANGUAGES` (default enabled): if not `0`, triggers background language seeding during home refresh.
+
+**Language catalog seeding (per-language backfill)**
+- `LANG_SEED_DESIRED_TOTAL` (default `48`, min `24`): target minimum number of titles to keep cached per language.
+- `LANG_SEED_DESIRED_UPCOMING` (default `6`, min `2`): target minimum number of upcoming titles per language.
+- `LANG_SEED_PAGES` (default `3`, max `5`): how many TMDB discover pages to scan per language.
+- `LANG_SEED_MAX_IDS` (default `72`, max `120`): cap on unique TMDB IDs fetched per language run.
+- `LANG_SEED_LOOKBACK_DAYS` (default `365`, max `3650`): how far back to discover titles for backfill (popular bias comes from TMDB sorting).
+- `LANG_SEED_FORWARD_DAYS` (default `365`, max `3650`): how far into the future to discover upcoming titles.
+
+Notes:
+- Seeding uses TMDB `discover` sorted by popularity, so it naturally favors popular old/new titles.
+- If you crank these values up too high, you can slow deploys/refreshes and increase TMDB API usage. Prefer running multiple admin-triggered seed runs rather than one huge run.
+
 Dev flow (two terminals):
 ```bash
 npm run server:dev
