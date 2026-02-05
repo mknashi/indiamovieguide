@@ -125,13 +125,18 @@ These are **backend** environment variables (set them on the Node server / Rende
 **Language catalog seeding (per-language backfill)**
 - `LANG_SEED_DESIRED_TOTAL` (default `48`, min `24`): target minimum number of titles to keep cached per language.
 - `LANG_SEED_DESIRED_UPCOMING` (default `6`, min `2`): target minimum number of upcoming titles per language.
-- `LANG_SEED_PAGES` (default `3`, max `5`): how many TMDB discover pages to scan per language.
-- `LANG_SEED_MAX_IDS` (default `72`, max `120`): cap on unique TMDB IDs fetched per language run.
-- `LANG_SEED_LOOKBACK_DAYS` (default `365`, max `12000`): how far back to discover titles for backfill (popular bias comes from TMDB sorting).
+- `LANG_SEED_PAGES` (default `3`, max `20`): how many TMDB discover pages to scan per language (per sort; see strategy + budget below).
+- `LANG_SEED_MAX_IDS` (default `72`, max `600`): cap on unique TMDB IDs fetched per language run.
+- `LANG_SEED_LOOKBACK_DAYS` (default `365`, max `40000`): how far back to discover titles for backfill.
 - `LANG_SEED_FORWARD_DAYS` (default `365`, max `3650`): how far into the future to discover upcoming titles.
+- `LANG_SEED_STRATEGY` (default `popular`, allowed: `popular|mixed`): discover ordering strategy.
+  - `popular`: only `popularity.desc` (fastest, but tends to plateau after repeated runs).
+  - `mixed`: rotates multiple sort orders (popularity, vote_count, revenue, release date) to find more unique titles over time.
+- `LANG_SEED_DISCOVER_BUDGET` (default `40`, min `10`, max `120`): safety cap on TMDB discover calls per window per language (prevents over-aggressive settings from exploding runtime).
+- `LANG_SEED_WINDOW_DAYS` (default `3650`): if lookback is large, rotate the backfill across time windows of this size (keeps repeated admin runs discovering new older titles without increasing API calls per run).
 
 Notes:
-- Seeding uses TMDB `discover` sorted by popularity, so it naturally favors popular old/new titles.
+- Seeding uses TMDB `discover` and is intentionally "popular-biased" by default; `LANG_SEED_STRATEGY=mixed` helps grow the catalog beyond the same top results.
 - If you crank these values up too high, you can slow deploys/refreshes and increase TMDB API usage. Prefer running multiple admin-triggered seed runs rather than one huge run.
 
 Dev flow (two terminals):

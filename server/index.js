@@ -459,7 +459,8 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   if (!force && lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
   // Allow backfilling older catalogs via env without code changes.
   // Keep a hard cap to avoid unbounded backfills by mistake (TMDB/API usage + time).
-  const MAX_LOOKBACK_DAYS = 12000; // ~32 years
+  // Note: "days" is only used to define a discover window; actual API usage is bounded by pages/maxIds/budget.
+  const MAX_LOOKBACK_DAYS = 40000; // ~109 years
   const MAX_FORWARD_DAYS = 3650; // 10 years
 
   const lookbackDaysEnv = Math.max(60, Math.min(MAX_LOOKBACK_DAYS, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
@@ -472,45 +473,95 @@ async function seedLanguageIfSparse(langName, opts = {}) {
     overrides.forwardDays != null && Number.isFinite(Number(overrides.forwardDays))
       ? Math.max(60, Math.min(MAX_FORWARD_DAYS, Number(overrides.forwardDays)))
       : forwardDaysEnv;
-  const past = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const future = new Date(Date.now() + forwardDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const past = new Date(Date.now() - lookbackDays * DAY_MS).toISOString().slice(0, 10);
+  const future = new Date(Date.now() + forwardDays * DAY_MS).toISOString().slice(0, 10);
 
-  const pagesEnv = Math.max(1, Math.min(5, Number(process.env.LANG_SEED_PAGES || 0) || 3));
-  const maxIdsEnv = Math.max(16, Math.min(120, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
+  const pagesEnv = Math.max(1, Math.min(20, Number(process.env.LANG_SEED_PAGES || 0) || 3));
+  const maxIdsEnv = Math.max(16, Math.min(600, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
   const pages =
     overrides.pages != null && Number.isFinite(Number(overrides.pages))
-      ? Math.max(1, Math.min(5, Number(overrides.pages)))
+      ? Math.max(1, Math.min(20, Number(overrides.pages)))
       : pagesEnv;
   const maxIds =
     overrides.maxIds != null && Number.isFinite(Number(overrides.maxIds))
-      ? Math.max(16, Math.min(120, Number(overrides.maxIds)))
+      ? Math.max(16, Math.min(600, Number(overrides.maxIds)))
       : maxIdsEnv;
+
+  const strategyEnvRaw = String(process.env.LANG_SEED_STRATEGY || '').trim().toLowerCase();
+  const strategyEnv = strategyEnvRaw === 'mixed' ? 'mixed' : 'popular';
+  const strategyRaw = String(overrides.strategy || '').trim().toLowerCase();
+  const strategy = strategyRaw === 'mixed' ? 'mixed' : strategyRaw === 'popular' ? 'popular' : strategyEnv;
+
+  const recentSorts = strategy === 'mixed'
+    ? ['popularity.desc', 'vote_count.desc', 'revenue.desc', 'primary_release_date.desc']
+    : ['popularity.desc'];
+  const upcomingSorts = strategy === 'mixed'
+    ? ['popularity.desc', 'primary_release_date.asc']
+    : ['popularity.desc'];
+
+  // Safety budget: cap discover calls per window/language so a misconfig doesn't explode runtime.
+  const DISCOVER_BUDGET = Math.max(10, Math.min(120, Number(process.env.LANG_SEED_DISCOVER_BUDGET || 0) || 40));
+  const pagesRecent = Math.max(1, Math.min(pages, Math.max(1, Math.floor(DISCOVER_BUDGET / recentSorts.length))));
+  const pagesUpcoming = Math.max(1, Math.min(pages, Math.max(1, Math.floor(DISCOVER_BUDGET / upcomingSorts.length))));
+
+  // If lookback is large, rotate across time windows so repeated backfills keep discovering new titles
+  // without increasing API usage per run.
+  const WINDOW_DAYS = Math.max(
+    365,
+    Math.min(MAX_LOOKBACK_DAYS, Number(process.env.LANG_SEED_WINDOW_DAYS || 0) || 3650)
+  ); // default 10y windows
+  let recentStart = past;
+  let recentEnd = today;
+  let windowInfo = null;
+  let cursorKey = null;
+  let cursor = null;
+  if (lookbackDays > WINDOW_DAYS * 1.2) {
+    cursorKey = `lang_seed_cursor:${String(langName || '').toLowerCase()}`;
+    cursor = metaGetNumber(cursorKey) || 0;
+    const numWindows = Math.max(1, Math.ceil(lookbackDays / WINDOW_DAYS));
+    const idx = cursor % numWindows;
+    const endMs = Date.now() - idx * WINDOW_DAYS * DAY_MS;
+    const startMs = endMs - WINDOW_DAYS * DAY_MS;
+    const minMs = Date.now() - lookbackDays * DAY_MS;
+    const clampedStart = Math.max(minMs, startMs);
+    const clampedEnd = Math.min(Date.now(), endMs);
+    recentStart = new Date(clampedStart).toISOString().slice(0, 10);
+    recentEnd = new Date(clampedEnd).toISOString().slice(0, 10);
+    windowInfo = { idx, numWindows, windowDays: WINDOW_DAYS, start: recentStart, end: recentEnd };
+  }
 
   const recentTasks = [];
   const upcomingTasks = [];
-  for (let p = 1; p <= pages; p++) {
-    recentTasks.push(
-      tmdbDiscoverMovies({
-        dateGte: past,
-        dateLte: today,
-        sortBy: 'popularity.desc',
-        page: p,
-        region: 'IN',
-        languages: [code],
-        voteCountGte: 0
-      }).catch(() => [])
-    );
-    upcomingTasks.push(
-      tmdbDiscoverMovies({
-        dateGte: today,
-        dateLte: future,
-        sortBy: 'popularity.desc',
-        page: p,
-        region: 'IN',
-        languages: [code],
-        voteCountGte: 0
-      }).catch(() => [])
-    );
+  for (const sortBy of recentSorts) {
+    for (let p = 1; p <= pagesRecent; p++) {
+      recentTasks.push(
+        tmdbDiscoverMovies({
+          dateGte: recentStart,
+          dateLte: recentEnd,
+          sortBy,
+          page: p,
+          region: 'IN',
+          languages: [code],
+          voteCountGte: 0
+        }).catch(() => [])
+      );
+    }
+  }
+  for (const sortBy of upcomingSorts) {
+    for (let p = 1; p <= pagesUpcoming; p++) {
+      upcomingTasks.push(
+        tmdbDiscoverMovies({
+          dateGte: today,
+          dateLte: future,
+          sortBy,
+          page: p,
+          region: 'IN',
+          languages: [code],
+          voteCountGte: 0
+        }).catch(() => [])
+      );
+    }
   }
 
   const [recentPages, upcomingPages] = await Promise.all([Promise.all(recentTasks), Promise.all(upcomingTasks)]);
@@ -532,7 +583,8 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   }
 
   if (wrote > 0) metaSet(langKey, String(Date.now()));
-  return { lang: langName, attempted: ids.length, wrote };
+  if (cursorKey) metaSet(cursorKey, String((cursor || 0) + 1));
+  return { lang: langName, attempted: ids.length, wrote, window: windowInfo, strategy };
 }
 
 async function seedAllLanguages({ force = false, overrides = undefined, cancelRef = undefined } = {}) {
@@ -1480,15 +1532,18 @@ function normalizeBackfillOverrides(raw) {
     if (!Number.isFinite(n)) return null;
     return Math.max(min, Math.min(max, Math.trunc(n)));
   };
-  const MAX_LOOKBACK_DAYS = 12000; // keep in sync with seedLanguageIfSparse
+  const MAX_LOOKBACK_DAYS = 40000; // keep in sync with seedLanguageIfSparse
   const MAX_FORWARD_DAYS = 3650;
+  const strategyRaw = String(o.strategy || '').trim().toLowerCase();
+  const strategy = strategyRaw === 'mixed' ? 'mixed' : strategyRaw === 'popular' ? 'popular' : null;
   return {
     lookbackDays: clampInt(o.lookbackDays, 60, MAX_LOOKBACK_DAYS),
     forwardDays: clampInt(o.forwardDays, 60, MAX_FORWARD_DAYS),
-    pages: clampInt(o.pages, 1, 5),
-    maxIds: clampInt(o.maxIds, 16, 120),
+    pages: clampInt(o.pages, 1, 20),
+    maxIds: clampInt(o.maxIds, 16, 600),
     desiredTotal: clampInt(o.desiredTotal, 24, 25000),
-    desiredUpcoming: clampInt(o.desiredUpcoming, 2, 5000)
+    desiredUpcoming: clampInt(o.desiredUpcoming, 2, 5000),
+    strategy
   };
 }
 

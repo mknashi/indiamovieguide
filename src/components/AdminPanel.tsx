@@ -143,6 +143,7 @@ export function AdminPanel({
   const [backfillScope, setBackfillScope] = useState<'all' | 'language'>('all');
   const [backfillLang, setBackfillLang] = useState<string>('Hindi');
   const [backfillParams, setBackfillParams] = useState({
+    strategy: 'mixed' as 'popular' | 'mixed',
     lookbackDays: 5475,
     forwardDays: 365,
     pages: 5,
@@ -590,18 +591,33 @@ export function AdminPanel({
                     <div className="tagline">
                       Runs a longer TMDB backfill (popular bias) to grow the catalog. This can take several minutes.
                     </div>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                        <select
+                          className="input"
+                          value={backfillParams.strategy}
+                          onChange={(e) =>
+                            setBackfillParams((p) => ({
+                              ...p,
+                              strategy: e.target.value === 'popular' ? 'popular' : 'mixed'
+                            }))
+                          }
+                          title="Discover strategy"
+                          style={{ minWidth: 220 }}
+                        >
+                          <option value="mixed">Mixed strategy (recommended)</option>
+                          <option value="popular">Popular only</option>
+                        </select>
 
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-                      <select
-                        className="input"
-                        value={backfillScope}
-                        onChange={(e) => setBackfillScope(e.target.value === 'language' ? 'language' : 'all')}
-                        title="Scope"
-                        style={{ minWidth: 220 }}
-                      >
-                        <option value="all">All languages</option>
-                        <option value="language">One language</option>
-                      </select>
+                        <select
+                          className="input"
+                          value={backfillScope}
+                          onChange={(e) => setBackfillScope(e.target.value === 'language' ? 'language' : 'all')}
+                          title="Scope"
+                          style={{ minWidth: 220 }}
+                        >
+                          <option value="all">All languages</option>
+                          <option value="language">One language</option>
+                        </select>
 
                       {backfillScope === 'language' ? (
                         <select
@@ -660,7 +676,7 @@ export function AdminPanel({
                         />
                       </label>
                       <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="tagline">Pages (1–5)</span>
+                        <span className="tagline">Pages (1–20)</span>
                         <input
                           className="input"
                           inputMode="numeric"
@@ -671,7 +687,7 @@ export function AdminPanel({
                         />
                       </label>
                       <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="tagline">Max IDs (16–120)</span>
+                        <span className="tagline">Max IDs (16–600)</span>
                         <input
                           className="input"
                           inputMode="numeric"
@@ -722,6 +738,7 @@ export function AdminPanel({
                                 lang: backfillScope === 'language' ? backfillLang : '',
                                 force: !!backfillParams.force,
                                 overrides: {
+                                  strategy: backfillParams.strategy,
                                   lookbackDays: backfillParams.lookbackDays,
                                   forwardDays: backfillParams.forwardDays,
                                   pages: backfillParams.pages,
