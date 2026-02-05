@@ -176,6 +176,7 @@ a {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
   gap: 24px;
+  align-items: start;
 }
 
 .hero-card {
@@ -186,11 +187,6 @@ a {
       border-box,
     var(--panel) padding-box;
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
-}
-
-.star-power-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .star-power-avatar {
@@ -307,6 +303,11 @@ a {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 18px;
+}
+
+.grid.star-power-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 /* Movie details page */
@@ -730,12 +731,12 @@ button.detail {
   .hero-tips {
     display: none;
   }
-  .star-power-grid {
+  .grid.star-power-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
   /* Only show a few actors on mobile so the hero stays compact. */
-  .star-power-grid > :nth-child(n + 5) {
+  .grid.star-power-grid > :nth-child(n + 5) {
     display: none;
   }
   .star-power-avatar {
