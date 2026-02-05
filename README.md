@@ -127,7 +127,7 @@ These are **backend** environment variables (set them on the Node server / Rende
 - `LANG_SEED_DESIRED_UPCOMING` (default `6`, min `2`): target minimum number of upcoming titles per language.
 - `LANG_SEED_PAGES` (default `3`, max `5`): how many TMDB discover pages to scan per language.
 - `LANG_SEED_MAX_IDS` (default `72`, max `120`): cap on unique TMDB IDs fetched per language run.
-- `LANG_SEED_LOOKBACK_DAYS` (default `365`, max `3650`): how far back to discover titles for backfill (popular bias comes from TMDB sorting).
+- `LANG_SEED_LOOKBACK_DAYS` (default `365`, max `12000`): how far back to discover titles for backfill (popular bias comes from TMDB sorting).
 - `LANG_SEED_FORWARD_DAYS` (default `365`, max `3650`): how far into the future to discover upcoming titles.
 
 Notes:

@@ -458,15 +458,19 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   const lastLangSeedAt = metaGetNumber(langKey);
   if (!force && lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
   // Allow backfilling older catalogs via env without code changes.
-  const lookbackDaysEnv = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
-  const forwardDaysEnv = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_FORWARD_DAYS || 0) || 365));
+  // Keep a hard cap to avoid unbounded backfills by mistake (TMDB/API usage + time).
+  const MAX_LOOKBACK_DAYS = 12000; // ~32 years
+  const MAX_FORWARD_DAYS = 3650; // 10 years
+
+  const lookbackDaysEnv = Math.max(60, Math.min(MAX_LOOKBACK_DAYS, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
+  const forwardDaysEnv = Math.max(60, Math.min(MAX_FORWARD_DAYS, Number(process.env.LANG_SEED_FORWARD_DAYS || 0) || 365));
   const lookbackDays =
     overrides.lookbackDays != null && Number.isFinite(Number(overrides.lookbackDays))
-      ? Math.max(60, Math.min(3650, Number(overrides.lookbackDays)))
+      ? Math.max(60, Math.min(MAX_LOOKBACK_DAYS, Number(overrides.lookbackDays)))
       : lookbackDaysEnv;
   const forwardDays =
     overrides.forwardDays != null && Number.isFinite(Number(overrides.forwardDays))
-      ? Math.max(60, Math.min(3650, Number(overrides.forwardDays)))
+      ? Math.max(60, Math.min(MAX_FORWARD_DAYS, Number(overrides.forwardDays)))
       : forwardDaysEnv;
   const past = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const future = new Date(Date.now() + forwardDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -1440,9 +1444,11 @@ function normalizeBackfillOverrides(raw) {
     if (!Number.isFinite(n)) return null;
     return Math.max(min, Math.min(max, Math.trunc(n)));
   };
+  const MAX_LOOKBACK_DAYS = 12000; // keep in sync with seedLanguageIfSparse
+  const MAX_FORWARD_DAYS = 3650;
   return {
-    lookbackDays: clampInt(o.lookbackDays, 60, 3650),
-    forwardDays: clampInt(o.forwardDays, 60, 3650),
+    lookbackDays: clampInt(o.lookbackDays, 60, MAX_LOOKBACK_DAYS),
+    forwardDays: clampInt(o.forwardDays, 60, MAX_FORWARD_DAYS),
     pages: clampInt(o.pages, 1, 5),
     maxIds: clampInt(o.maxIds, 16, 120),
     desiredTotal: clampInt(o.desiredTotal, 24, 25000),

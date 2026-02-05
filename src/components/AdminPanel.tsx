@@ -143,7 +143,7 @@ export function AdminPanel({
   const [backfillScope, setBackfillScope] = useState<'all' | 'language'>('all');
   const [backfillLang, setBackfillLang] = useState<string>('Hindi');
   const [backfillParams, setBackfillParams] = useState({
-    lookbackDays: 3650,
+    lookbackDays: 5475,
     forwardDays: 365,
     pages: 5,
     maxIds: 120,
@@ -641,7 +641,7 @@ export function AdminPanel({
                           inputMode="numeric"
                           value={String(backfillParams.lookbackDays)}
                           onChange={(e) => setBackfillParams((p) => ({ ...p, lookbackDays: Number(e.target.value || 0) }))}
-                          placeholder="e.g. 3650"
+                          placeholder="e.g. 5475"
                           title="How far back to discover titles (popular bias)."
                         />
                       </label>
