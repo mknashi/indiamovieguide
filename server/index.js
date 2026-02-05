@@ -448,8 +448,11 @@ async function seedLanguageIfSparse(langName, opts = {}) {
     haveTotal < desiredTotal || haveUpcoming < desiredUpcoming ? 30 * 60 * 1000 : 12 * 60 * 60 * 1000;
   const lastLangSeedAt = metaGetNumber(langKey);
   if (!force && lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
-  const past365 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const future365 = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // Allow backfilling older catalogs via env without code changes.
+  const lookbackDays = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
+  const forwardDays = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_FORWARD_DAYS || 0) || 365));
+  const past = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const future = new Date(Date.now() + forwardDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const pages = Math.max(1, Math.min(5, Number(process.env.LANG_SEED_PAGES || 0) || 3));
   const maxIds = Math.max(16, Math.min(120, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
@@ -459,7 +462,7 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   for (let p = 1; p <= pages; p++) {
     recentTasks.push(
       tmdbDiscoverMovies({
-        dateGte: past365,
+        dateGte: past,
         dateLte: today,
         sortBy: 'popularity.desc',
         page: p,
@@ -471,7 +474,7 @@ async function seedLanguageIfSparse(langName, opts = {}) {
     upcomingTasks.push(
       tmdbDiscoverMovies({
         dateGte: today,
-        dateLte: future365,
+        dateLte: future,
         sortBy: 'popularity.desc',
         page: p,
         region: 'IN',
