@@ -138,6 +138,26 @@ function hasDistBuild() {
   }
 }
 
+const SITE_URL = String(process.env.SITE_URL || 'https://indiamovieguide.com').replace(/\/+$/, '');
+
+function canonicalUrlFor(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'https';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  // Prefer configured site URL to avoid indexing the Render default hostname.
+  const base = SITE_URL || (host ? `${proto}://${host}` : 'https://indiamovieguide.com');
+  const pathPart = String(req.path || '/');
+  return `${String(base).replace(/\/+$/, '')}${pathPart === '/' ? '/' : pathPart}`;
+}
+
+function escapeXml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 const LANG_TO_TMDB = {
   Hindi: 'hi',
   Kannada: 'kn',
@@ -3210,6 +3230,99 @@ app.get('/api/catalog.json', (_req, res) => {
   res.json({ generatedAt: nowIso(), movies: ids.map((id) => hydrateMovie(db, id)).filter(Boolean) });
 });
 
+// --- SEO: robots + sitemap ---
+app.get('/robots.txt', (req, res) => {
+  const base = SITE_URL || canonicalUrlFor(req).replace(/\/+$/, '');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(
+    [
+      'User-agent: *',
+      'Disallow: /admin',
+      'Disallow: /account',
+      'Disallow: /login',
+      'Disallow: /submit',
+      'Disallow: /search',
+      `Sitemap: ${base}/sitemap.xml`,
+      ''
+    ].join('\n')
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const base = SITE_URL || canonicalUrlFor(req).replace(/\/+$/, '');
+  const maxUrls = Math.max(200, Math.min(50000, Number(process.env.SITEMAP_MAX_URLS || 0) || 2000));
+  const movieLimit = Math.max(100, Math.floor(maxUrls * 0.8));
+  const personLimit = Math.max(50, Math.floor(maxUrls * 0.2));
+
+  const staticPaths = ['/', '/about', '/contact', '/feedback', '/privacy'];
+  const urls = [];
+  for (const p of staticPaths) {
+    urls.push({ loc: `${base}${p === '/' ? '/' : p}`, lastmod: null, priority: p === '/' ? '1.0' : '0.6' });
+  }
+
+  const movies = db
+    .prepare(
+      `
+      SELECT tmdb_id, updated_at
+      FROM movies
+      WHERE tmdb_id IS NOT NULL
+        AND COALESCE(is_indian, 1) = 1
+      ORDER BY COALESCE(updated_at, created_at) DESC
+      LIMIT ?
+    `
+    )
+    .all(movieLimit);
+  for (const m of movies) {
+    if (!m?.tmdb_id) continue;
+    const lastmod = String(m.updated_at || '').slice(0, 10);
+    urls.push({
+      loc: `${base}/movie/${encodeURIComponent(String(m.tmdb_id))}`,
+      lastmod: /^\d{4}-\d{2}-\d{2}$/.test(lastmod) ? lastmod : null,
+      priority: '0.7'
+    });
+  }
+
+  const persons = db
+    .prepare(
+      `
+      SELECT tmdb_id, updated_at
+      FROM persons
+      WHERE tmdb_id IS NOT NULL
+      ORDER BY COALESCE(updated_at, created_at) DESC
+      LIMIT ?
+    `
+    )
+    .all(personLimit);
+  for (const p of persons) {
+    if (!p?.tmdb_id) continue;
+    const lastmod = String(p.updated_at || '').slice(0, 10);
+    urls.push({
+      loc: `${base}/person/${encodeURIComponent(String(p.tmdb_id))}`,
+      lastmod: /^\d{4}-\d{2}-\d{2}$/.test(lastmod) ? lastmod : null,
+      priority: '0.5'
+    });
+  }
+
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  const body =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    urls
+      .slice(0, maxUrls)
+      .map((u) => {
+        const parts = [`  <url>`, `    <loc>${escapeXml(u.loc)}</loc>`];
+        if (u.lastmod) parts.push(`    <lastmod>${escapeXml(u.lastmod)}</lastmod>`);
+        if (u.priority) parts.push(`    <priority>${escapeXml(u.priority)}</priority>`);
+        parts.push(`  </url>`);
+        return parts.join('\n');
+      })
+      .join('\n') +
+    `\n</urlset>\n`;
+  res.send(body);
+});
+
 // Serve Vite build output for any non-API routes (SPA fallback).
 // Keep this near the end so API endpoints take priority.
 if (fs.existsSync(DIST_DIR)) {
@@ -3229,7 +3342,16 @@ if (fs.existsSync(DIST_DIR)) {
     if (req.path.startsWith('/api')) return next();
     if (!hasDistBuild()) return next();
     res.setHeader('Cache-Control', 'no-store');
-    res.sendFile(DIST_INDEX);
+    try {
+      const html = fs.readFileSync(DIST_INDEX, 'utf-8');
+      const canonical = canonicalUrlFor(req);
+      const out = html
+        .replaceAll('__CANONICAL_URL__', canonical)
+        .replaceAll('__SITE_URL__', SITE_URL || canonical.replace(/\/+$/, ''));
+      res.status(200).send(out);
+    } catch {
+      res.sendFile(DIST_INDEX);
+    }
   });
 }
 

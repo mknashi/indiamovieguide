@@ -5,8 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="IndiaMovieGuide.com – modern guide to Indian cinema with movies, music, and cast insights."
+      content="IndiaMovieGuide — a modern guide to Indian cinema. Discover new and upcoming movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs."
     />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="#0d1117" />
+
+    <meta property="og:site_name" content="IndiaMovieGuide" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers" />
+    <meta
+      property="og:description"
+      content="Discover new and upcoming Indian movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs."
+    />
+    <meta property="og:url" content="__CANONICAL_URL__" />
+    <meta property="og:image" content="https://indiamovieguide.com/brand/og-image.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers" />
+    <meta
+      name="twitter:description"
+      content="Discover new and upcoming Indian movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs."
+    />
+    <meta name="twitter:image" content="https://indiamovieguide.com/brand/og-image.svg" />
+
+    <link rel="canonical" href="__CANONICAL_URL__" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -14,10 +38,28 @@
       rel="stylesheet"
     />
     <link rel="icon" type="image/svg+xml" href="/brand/india-movie-guide-icon.svg" />
-    <title>IndiaMovieGuide.com</title>
+    <title>IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers</title>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "IndiaMovieGuide",
+        "url": "__SITE_URL__",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "__SITE_URL__/search?q={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <noscript>
+        IndiaMovieGuide helps you discover Indian movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs.
+      </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
