@@ -149,6 +149,17 @@ function canonicalUrlFor(req) {
   return `${String(base).replace(/\/+$/, '')}${pathPart === '/' ? '/' : pathPart}`;
 }
 
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function escapeXml(s) {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -156,6 +167,229 @@ function escapeXml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function clampText(s, max) {
+  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (t.length <= max) return t;
+  return t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
+}
+
+function absUrl(url, base) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  const b = String(base || '').replace(/\/+$/, '');
+  return `${b}${u.startsWith('/') ? '' : '/'}${u}`;
+}
+
+function setTitle(html, title) {
+  const t = escapeHtml(title);
+  const re = /<title>[^<]*<\/title>/i;
+  if (re.test(html)) return html.replace(re, `<title>${t}</title>`);
+  return html.replace('</head>', `  <title>${t}</title>\n</head>`);
+}
+
+function setMetaName(html, name, content) {
+  const c = escapeAttr(content);
+  const re = new RegExp(`<meta[^>]+name=["']${name}["'][^>]*>`, 'i');
+  const tag = `<meta name="${name}" content="${c}" />`;
+  if (re.test(html)) return html.replace(re, tag);
+  return html.replace('</head>', `  ${tag}\n</head>`);
+}
+
+function setMetaProp(html, prop, content) {
+  const c = escapeAttr(content);
+  const re = new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*>`, 'i');
+  const tag = `<meta property="${prop}" content="${c}" />`;
+  if (re.test(html)) return html.replace(re, tag);
+  return html.replace('</head>', `  ${tag}\n</head>`);
+}
+
+function setLinkRel(html, rel, href) {
+  const h = escapeAttr(href);
+  const re = new RegExp(`<link[^>]+rel=["']${rel}["'][^>]*>`, 'i');
+  const tag = `<link rel="${rel}" href="${h}" />`;
+  if (re.test(html)) return html.replace(re, tag);
+  return html.replace('</head>', `  ${tag}\n</head>`);
+}
+
+function injectJsonLd(html, json) {
+  const marker = '<!--__SEO_JSONLD__-->';
+  if (!html.includes(marker)) return html;
+  if (!json) return html.replace(marker, '');
+  return html.replace(marker, `<script type="application/ld+json">${json}</script>`);
+}
+
+function injectPrerender(html, prerenderHtml) {
+  const marker = '<!--__SEO_PRERENDER__-->';
+  if (!html.includes(marker)) return html;
+  return html.replace(marker, prerenderHtml || '');
+}
+
+function seoForPath(req, canonical, siteUrl) {
+  const defaultTitle = 'IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers';
+  const defaultDesc =
+    'IndiaMovieGuide — a modern guide to Indian cinema. Discover new and upcoming movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs.';
+  const ogDefault = absUrl('/brand/og-image.svg', siteUrl);
+
+  const path = String(req.path || '/');
+  const noIndex =
+    path.startsWith('/admin') ||
+    path.startsWith('/account') ||
+    path.startsWith('/login') ||
+    path.startsWith('/submit');
+
+  // Movie page
+  const movieMatch = path.match(/^\/movie\/([^/]+)$/);
+  if (movieMatch) {
+    const raw = decodeURIComponent(movieMatch[1]);
+    const tmdbId = /^\d+$/.test(raw) ? Number(raw) : null;
+    const movieId = tmdbId ? makeId('tmdb-movie', tmdbId) : raw.includes(':') ? raw : raw;
+    const m = hydrateMovie(db, movieId);
+    if (m) {
+      const year = m.releaseDate ? String(m.releaseDate).slice(0, 4) : '';
+      const title = `${m.title}${year ? ` (${year})` : ''} — IndiaMovieGuide`;
+      const desc = clampText(m.synopsis || `Explore ${m.title} on IndiaMovieGuide.`, 180);
+      const img = absUrl(m.backdrop || m.poster || ogDefault, siteUrl);
+      const castNames = (m.cast || []).slice(0, 6).map((c) => c?.name).filter(Boolean);
+      const castText = castNames.length ? `<p><strong>Cast:</strong> ${escapeHtml(castNames.join(', '))}</p>` : '';
+      const pre =
+        `<div style="padding:16px 20px;">` +
+        `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(m.title)}</h1>` +
+        `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+        castText +
+        `</div>`;
+
+      const json = JSON.stringify(
+        {
+          '@context': 'https://schema.org',
+          '@type': 'Movie',
+          name: m.title,
+          url: canonical,
+          description: clampText(m.synopsis || '', 420),
+          inLanguage: m.language || undefined,
+          datePublished: m.releaseDate || undefined,
+          image: [m.backdrop || '', m.poster || ''].filter(Boolean),
+          actor: (m.cast || [])
+            .slice(0, 8)
+            .map((c) => ({
+              '@type': 'Person',
+              name: c.name,
+              url: c?.tmdbId ? `${siteUrl}/person/${encodeURIComponent(String(c.tmdbId))}` : undefined
+            }))
+            .filter((x) => x.name),
+          director: m.director
+            ? [
+                {
+                  '@type': 'Person',
+                  name: m.director
+                }
+              ]
+            : undefined
+        },
+        null,
+        0
+      );
+
+      return {
+        title,
+        description: desc,
+        ogType: 'video.movie',
+        ogImage: img,
+        robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+        jsonLd: json,
+        prerender: pre
+      };
+    }
+  }
+
+  // Person page
+  const personMatch = path.match(/^\/person\/([^/]+)$/);
+  if (personMatch) {
+    const raw = decodeURIComponent(personMatch[1]);
+    const tmdbId = /^\d+$/.test(raw) ? Number(raw) : null;
+    const personId = tmdbId ? makeId('tmdb-person', tmdbId) : raw.includes(':') ? raw : raw;
+    const p = hydratePerson(db, personId);
+    if (p) {
+      const title = `${p.name} — Profile · IndiaMovieGuide`;
+      const desc = clampText(p.biography || `Explore ${p.name}'s bio and filmography on IndiaMovieGuide.`, 180);
+      const img = absUrl(p.profileImage || ogDefault, siteUrl);
+      const pre =
+        `<div style="padding:16px 20px;">` +
+        `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(p.name)}</h1>` +
+        `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+        `</div>`;
+      const json = JSON.stringify(
+        {
+          '@context': 'https://schema.org',
+          '@type': 'Person',
+          name: p.name,
+          url: canonical,
+          description: clampText(p.biography || '', 420),
+          image: p.profileImage || undefined,
+          sameAs: [p.wikiUrl || '', tmdbId ? `https://www.themoviedb.org/person/${tmdbId}` : ''].filter(Boolean)
+        },
+        null,
+        0
+      );
+      return {
+        title,
+        description: desc,
+        ogType: 'profile',
+        ogImage: img,
+        robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+        jsonLd: json,
+        prerender: pre
+      };
+    }
+  }
+
+  // Static pages
+  if (path === '/about') {
+    return {
+      title: 'About · IndiaMovieGuide',
+      description: 'Learn about IndiaMovieGuide — a modern, fast guide to Indian cinema across languages.',
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: 'index,follow',
+      jsonLd: '',
+      prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">About</h1></div>`
+    };
+  }
+  if (path === '/contact') {
+    return {
+      title: 'Contact · IndiaMovieGuide',
+      description: 'Contact IndiaMovieGuide — feedback, corrections, and partnership enquiries.',
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: 'index,follow',
+      jsonLd: '',
+      prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">Contact</h1></div>`
+    };
+  }
+  if (path === '/privacy') {
+    return {
+      title: 'Privacy Policy · IndiaMovieGuide',
+      description: 'Read the IndiaMovieGuide privacy policy.',
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: 'index,follow',
+      jsonLd: '',
+      prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">Privacy Policy</h1></div>`
+    };
+  }
+
+  return {
+    title: defaultTitle,
+    description: defaultDesc,
+    ogType: 'website',
+    ogImage: ogDefault,
+    robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+    jsonLd: '',
+    prerender: ''
+  };
 }
 
 const LANG_TO_TMDB = {
@@ -3345,9 +3579,27 @@ if (fs.existsSync(DIST_DIR)) {
     try {
       const html = fs.readFileSync(DIST_INDEX, 'utf-8');
       const canonical = canonicalUrlFor(req);
-      const out = html
+      const siteUrl = SITE_URL || canonical.replace(/\/+$/, '');
+      const seo = seoForPath(req, canonical, siteUrl);
+
+      let out = html
         .replaceAll('__CANONICAL_URL__', canonical)
-        .replaceAll('__SITE_URL__', SITE_URL || canonical.replace(/\/+$/, ''));
+        .replaceAll('__SITE_URL__', siteUrl);
+
+      out = setTitle(out, seo.title);
+      out = setMetaName(out, 'description', seo.description);
+      out = setMetaName(out, 'robots', seo.robots);
+      out = setLinkRel(out, 'canonical', canonical);
+      out = setMetaProp(out, 'og:url', canonical);
+      out = setMetaProp(out, 'og:type', seo.ogType);
+      out = setMetaProp(out, 'og:title', seo.title);
+      out = setMetaProp(out, 'og:description', seo.description);
+      out = setMetaProp(out, 'og:image', seo.ogImage);
+      out = setMetaName(out, 'twitter:title', seo.title);
+      out = setMetaName(out, 'twitter:description', seo.description);
+      out = setMetaName(out, 'twitter:image', seo.ogImage);
+      out = injectJsonLd(out, seo.jsonLd);
+      out = injectPrerender(out, seo.prerender);
       res.status(200).send(out);
     } catch {
       res.sendFile(DIST_INDEX);
