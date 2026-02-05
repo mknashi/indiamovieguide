@@ -130,7 +130,7 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
             </a>
           </div>
 
-          <div className="detail" style={{ marginTop: 16 }}>
+          <div className="detail hero-tips" style={{ marginTop: 16 }}>
             <h4 style={{ marginTop: 0 }}>Quick tips</h4>
             <div className="meta" style={{ marginTop: 10 }}>
               <span className="chip">Search by actor, genre, or language</span>
@@ -145,7 +145,7 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
             <h3>Star Power</h3>
             <span className="inline-pill">Popular actors</span>
           </div>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+          <div className="grid star-power-grid">
             {spotlight.flatMap((g) => g.persons.map((p) => ({ ...p, group: g.language }))).slice(0, 9).map((p) => (
               <a
                 key={`${p.tmdbId}-${p.name}`}
@@ -163,13 +163,7 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
                     <img
                       src={p.profileImage}
                       alt={p.name}
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 12,
-                        objectFit: 'cover',
-                        border: '1px solid rgba(255,255,255,0.10)'
-                      }}
+                      className="star-power-avatar"
                       loading="lazy"
                     />
                   ) : (
