@@ -3031,60 +3031,67 @@ app.get('/api/search', async (req, res) => {
   const upsertedMovieIds = [];
   const upsertedPersonIds = [];
 
+  const upsertMovieHit = async (hit) => {
+    if (!hit?.tmdbId) return null;
+    const full = await tmdbGetMovieFull(hit.tmdbId);
+    if (!isLikelyIndianMovie(full)) return null;
+    const movieId = upsertMovieFromTmdb(db, full);
+    upsertedMovieIds.push(movieId);
+
+    // Ratings from OMDb (optional; needs OMDB_API_KEY).
+    try {
+      const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : undefined;
+      const omdb = await omdbByTitle(full.title, year);
+      upsertRatingsFromOmdb(db, movieId, omdb);
+    } catch {
+      // ignore
+    }
+
+    // If TMDB trailer is missing, try YouTube "official trailer".
+    if (!full.trailerUrl) {
+      const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
+      const trailerUrl = yt[0]?.youtubeUrl || '';
+      if (trailerUrl) {
+        db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(trailerUrl, nowIso(), movieId);
+      }
+    }
+
+    // Songs playlist
+    const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
+    const wiki = await wikipediaTracklistForMovie({
+      title: full.title,
+      year,
+      language: full.language,
+      castNames: (full.cast || []).slice(0, 2).map((c) => c?.name).filter(Boolean)
+    }).catch(() => null);
+    if (wiki?.tracks?.length) {
+      const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
+      const trackMap = await youtubeMatchVideosForTracklist({
+        movieTitle: full.title,
+        language: full.language,
+        year,
+        tracks: wiki.tracks,
+        mode: ytMode
+      }).catch(() => new Map());
+      const songs = wiki.tracks
+        .slice(0, 20)
+        .map((t) => ({ title: t, singers: [], youtubeUrl: trackMap.get(t) || '' }));
+      replaceSongsForMovie(db, movieId, songs, { source: 'wikipedia', platform: 'YouTube', wikiUrl: wiki.url || '' });
+    } else {
+      const hints = hintTokensFromNames((full.cast || []).slice(0, 8).map((c) => c?.name).filter(Boolean));
+      const songs = await youtubeSearchSongsForMovie({ title: full.title, year, language: full.language, hints }).catch(
+        () => []
+      );
+      replaceSongsFromYoutube(db, movieId, songs);
+    }
+
+    return movieId;
+  };
+
   for (const hit of movieHits) {
     if (upsertedMovieIds.length >= 3) break;
     try {
-      const full = await tmdbGetMovieFull(hit.tmdbId);
-      if (!isLikelyIndianMovie(full)) continue;
-      const movieId = upsertMovieFromTmdb(db, full);
-      upsertedMovieIds.push(movieId);
-
-      // Ratings from OMDb (optional; needs OMDB_API_KEY).
-      try {
-        const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : undefined;
-        const omdb = await omdbByTitle(full.title, year);
-        upsertRatingsFromOmdb(db, movieId, omdb);
-      } catch {
-        // ignore
-      }
-
-      // If TMDB trailer is missing, try YouTube "official trailer".
-      if (!full.trailerUrl) {
-        const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
-        const trailerUrl = yt[0]?.youtubeUrl || '';
-        if (trailerUrl) {
-          db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(
-            trailerUrl,
-            nowIso(),
-            movieId
-          );
-        }
-      }
-
-      // Songs playlist
-      const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
-      const wiki = await wikipediaTracklistForMovie({
-        title: full.title,
-        year,
-        language: full.language,
-        castNames: (full.cast || []).slice(0, 2).map((c) => c?.name).filter(Boolean)
-      }).catch(() => null);
-      if (wiki?.tracks?.length) {
-        const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
-        const trackMap = await youtubeMatchVideosForTracklist({
-          movieTitle: full.title,
-          language: full.language,
-          year,
-          tracks: wiki.tracks,
-          mode: ytMode
-        }).catch(() => new Map());
-        const songs = wiki.tracks.slice(0, 20).map((t) => ({ title: t, singers: [], youtubeUrl: trackMap.get(t) || '' }));
-        replaceSongsForMovie(db, movieId, songs, { source: 'wikipedia', platform: 'YouTube', wikiUrl: wiki.url || '' });
-      } else {
-        const hints = hintTokensFromNames((full.cast || []).slice(0, 8).map((c) => c?.name).filter(Boolean));
-        const songs = await youtubeSearchSongsForMovie({ title: full.title, year, language: full.language, hints }).catch(() => []);
-        replaceSongsFromYoutube(db, movieId, songs);
-      }
+      await upsertMovieHit(hit);
     } catch {
       // ignore
     }
@@ -3165,6 +3172,42 @@ app.get('/api/search', async (req, res) => {
       .map((id) => hydratePerson(db, id))
       .filter(Boolean);
     refreshed = { movies, persons };
+  }
+
+  // If we *still* have nothing, try a Wikipedia canonical-title retry even if TMDB returned irrelevant hits.
+  // This catches spelling variants like "Jodha Akbar" -> "Jodhaa Akbar".
+  if (refreshed.movies.length === 0 && refreshed.persons.length === 0) {
+    try {
+      const wikiTitle =
+        (await wikipediaSearchTitle(q).catch(() => null)) ||
+        (await wikipediaSearchTitle(`${q} film`).catch(() => null));
+      if (wikiTitle && wikiTitle.toLowerCase() !== q.toLowerCase()) {
+        const retryHits = await tmdbSearchMovie(wikiTitle).catch(() => []);
+        for (const hit of retryHits) {
+          if (upsertedMovieIds.length >= 3) break;
+          try {
+            await upsertMovieHit(hit);
+          } catch {
+            // ignore
+          }
+        }
+        if (!didYouMean) didYouMean = wikiTitle;
+        const after = searchLocal(db, wikiTitle);
+        if (after.movies.length || after.persons.length) refreshed = after;
+        if (refreshed.movies.length === 0 && refreshed.persons.length === 0) {
+          // Last resort: return any upserts.
+          const movies = Array.from(new Set(upsertedMovieIds))
+            .map((id) => hydrateMovie(db, id))
+            .filter(Boolean);
+          const persons = Array.from(new Set(upsertedPersonIds))
+            .map((id) => hydratePerson(db, id))
+            .filter(Boolean);
+          refreshed = { movies, persons };
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   res.json({ ...refreshed, source: 'providers', ...(didYouMean ? { didYouMean } : {}) });
