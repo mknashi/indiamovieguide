@@ -3120,7 +3120,10 @@ app.get('/api/browse', async (req, res) => {
 
   const lang = String(req.query.lang || '').trim();
   const genre = String(req.query.genre || '').trim();
-  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 60)));
+  const page = Math.max(1, Math.min(500, Number(req.query.page || 1) || 1));
+  const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 60;
+  const pageSize = Math.max(1, Math.min(80, Number(pageSizeRaw) || 60));
+  const offset = (page - 1) * pageSize;
   if (lang) {
     const haveLang = db
       .prepare('SELECT COUNT(*) as c FROM movies WHERE lower(language) = lower(?)')
@@ -3132,6 +3135,31 @@ app.get('/api/browse', async (req, res) => {
     }
   }
 
+  const totalRow = genre
+    ? db
+        .prepare(
+          `
+          SELECT COUNT(DISTINCT m.id) as c
+          FROM movies m
+          JOIN movie_genres mg ON mg.movie_id = m.id
+          WHERE (? = '' OR lower(m.language) = lower(?))
+            AND COALESCE(m.is_indian, 1) = 1
+            AND lower(mg.genre) = lower(?)
+        `
+        )
+        .get(lang, lang, genre)
+    : db
+        .prepare(
+          `
+          SELECT COUNT(*) as c
+          FROM movies m
+          WHERE (? = '' OR lower(m.language) = lower(?))
+            AND COALESCE(m.is_indian, 1) = 1
+        `
+        )
+        .get(lang, lang);
+  const total = Number(totalRow?.c || 0) || 0;
+
   const ids = db
     .prepare(
       `
@@ -3142,10 +3170,10 @@ app.get('/api/browse', async (req, res) => {
         AND COALESCE(m.is_indian, 1) = 1
         AND (? = '' OR lower(mg.genre) = lower(?))
       ORDER BY COALESCE(m.release_date, '0000-00-00') DESC
-      LIMIT ?
+      LIMIT ? OFFSET ?
     `
     )
-    .all(lang, lang, genre, genre, limit)
+    .all(lang, lang, genre, genre, pageSize, offset)
     .map((r) => r.id);
 
   // Ensure the first page is enriched for ratings/reviews/trailer.
@@ -3165,7 +3193,11 @@ app.get('/api/browse', async (req, res) => {
   res.json({
     generatedAt: nowIso(),
     movies: ids.map((id) => hydrateMovie(db, id)).filter(Boolean),
-    filters: { lang: lang || null, genre: genre || null, limit }
+    page,
+    pageSize,
+    total,
+    hasMore: offset + ids.length < total,
+    filters: { lang: lang || null, genre: genre || null }
   });
 });
 

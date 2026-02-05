@@ -19,6 +19,9 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
   const [spotlight, setSpotlight] = useState<SpotlightGroup[]>([]);
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const [genreMovies, setGenreMovies] = useState<Movie[]>([]);
+  const [genrePage, setGenrePage] = useState(1);
+  const [genreHasMore, setGenreHasMore] = useState(false);
+  const [genreTotal, setGenreTotal] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -26,6 +29,9 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
       setLoading(true);
       setActiveGenre(null);
       setGenreMovies([]);
+      setGenrePage(1);
+      setGenreHasMore(false);
+      setGenreTotal(null);
       try {
         const payload = await fetchHome(lang, { refresh: !!refresh });
         if (!alive) return;
@@ -91,6 +97,17 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
       return bd - ad;
     });
   }, [genreMovies]);
+
+  const fetchGenrePage = async (nextGenre: string, page: number) => {
+    const params = new URLSearchParams();
+    params.set('genre', nextGenre);
+    if (lang) params.set('lang', lang);
+    params.set('page', String(page));
+    params.set('pageSize', String(24));
+    const res = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  };
 
   return (
     <div>
@@ -215,16 +232,18 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
                 const next = activeGenre === g.genre ? null : g.genre;
                 setActiveGenre(next);
                 setGenreMovies([]);
+                setGenrePage(1);
+                setGenreHasMore(false);
+                setGenreTotal(null);
                 if (!next) return;
                 setLoading(true);
                 try {
-                  const params = new URLSearchParams();
-                  params.set('genre', next);
-                  if (lang) params.set('lang', lang);
-                  const res = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
-                  if (!res.ok) return;
-                  const payload = await res.json();
-                  setGenreMovies(Array.isArray(payload.movies) ? payload.movies : []);
+                  const payload = await fetchGenrePage(next, 1);
+                  const rows = Array.isArray(payload.movies) ? payload.movies : [];
+                  setGenreMovies(rows);
+                  setGenrePage(Number(payload.page || 1) || 1);
+                  setGenreHasMore(!!payload.hasMore);
+                  setGenreTotal(typeof payload.total === 'number' ? payload.total : null);
                 } finally {
                   setLoading(false);
                 }
@@ -251,15 +270,51 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
             <h3>
               {activeGenre} {lang ? `· ${lang}` : ''}
             </h3>
-            <span className="inline-pill">{browseSorted.length} titles</span>
+            <span className="inline-pill">
+              {genreTotal != null ? `${browseSorted.length} / ${genreTotal}` : `${browseSorted.length} titles`}
+            </span>
           </div>
           <div className="grid">
-            {browseSorted.slice(0, 24).map((m) => (
+            {browseSorted.map((m) => (
               <div key={m.id}>
                 <MovieCard movie={m} />
               </div>
             ))}
           </div>
+
+          {genreHasMore ? (
+            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={loading}
+                onClick={async () => {
+                  if (!activeGenre) return;
+                  setLoading(true);
+                  try {
+                    const nextPage = genrePage + 1;
+                    const payload = await fetchGenrePage(activeGenre, nextPage);
+                    const rows = Array.isArray(payload.movies) ? payload.movies : [];
+                    setGenreMovies((prev) => {
+                      const seen = new Set(prev.map((x) => x.id));
+                      const merged = prev.slice();
+                      for (const r of rows) {
+                        if (r?.id && !seen.has(r.id)) merged.push(r);
+                      }
+                      return merged;
+                    });
+                    setGenrePage(Number(payload.page || nextPage) || nextPage);
+                    setGenreHasMore(!!payload.hasMore);
+                    setGenreTotal(typeof payload.total === 'number' ? payload.total : genreTotal);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                {loading ? 'Loading…' : 'Load more'}
+              </button>
+            </div>
+          ) : null}
         </>
       )}
     </div>
