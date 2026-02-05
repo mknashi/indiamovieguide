@@ -298,7 +298,7 @@ export function AdminPanel({
 
   const body = (
     <div
-      className="card"
+      className="card admin-card"
       style={{
         width: 'min(1040px, 96vw)',
         maxHeight: variant === 'modal' ? '88vh' : 'none',
@@ -634,54 +634,72 @@ export function AdminPanel({
                         marginTop: 12
                       }}
                     >
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.lookbackDays)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, lookbackDays: Number(e.target.value || 0) }))}
-                        placeholder="Lookback days"
-                        title="Lookback days"
-                      />
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.forwardDays)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, forwardDays: Number(e.target.value || 0) }))}
-                        placeholder="Forward days"
-                        title="Forward days"
-                      />
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.pages)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, pages: Number(e.target.value || 0) }))}
-                        placeholder="Pages (1-5)"
-                        title="Pages (1-5)"
-                      />
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.maxIds)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, maxIds: Number(e.target.value || 0) }))}
-                        placeholder="Max IDs (16-120)"
-                        title="Max IDs (16-120)"
-                      />
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.desiredTotal)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, desiredTotal: Number(e.target.value || 0) }))}
-                        placeholder="Desired total / lang"
-                        title="Desired total / language"
-                      />
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        value={String(backfillParams.desiredUpcoming)}
-                        onChange={(e) => setBackfillParams((p) => ({ ...p, desiredUpcoming: Number(e.target.value || 0) }))}
-                        placeholder="Desired upcoming / lang"
-                        title="Desired upcoming / language"
-                      />
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Lookback days</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.lookbackDays)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, lookbackDays: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 3650"
+                          title="How far back to discover titles (popular bias)."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Forward days</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.forwardDays)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, forwardDays: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 365"
+                          title="How far ahead to discover upcoming titles."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Pages (1–5)</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.pages)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, pages: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 5"
+                          title="How many TMDB discover pages to scan per language."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Max IDs (16–120)</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.maxIds)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, maxIds: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 120"
+                          title="Max unique TMDB IDs fetched per language run."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Desired total / language</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.desiredTotal)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, desiredTotal: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 2500"
+                          title="If the language already has at least this many titles, it may skip unless forced."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Desired upcoming / language</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(backfillParams.desiredUpcoming)}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, desiredUpcoming: Number(e.target.value || 0) }))}
+                          placeholder="e.g. 30"
+                          title="If the language already has at least this many upcoming titles, it may skip unless forced."
+                        />
+                      </label>
                     </div>
 
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
