@@ -18,6 +18,7 @@ interface AdminStatus {
   lastAllLanguagesSeedAtIso?: string | null;
   languageSeeds?: Record<string, string | null>;
   youtubeQuotaUntilIso?: string | null;
+  backfill?: any;
   agentLastRun?: {
     startedAt?: string;
     finishedAt?: string;
@@ -139,6 +140,18 @@ export function AdminPanel({
   const [tab, setTab] = useState<'overview' | 'seeding' | 'catalog' | 'moderation' | 'ingestion'>('overview');
   const [seedLang, setSeedLang] = useState<string>('Hindi');
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
+  const [backfillScope, setBackfillScope] = useState<'all' | 'language'>('all');
+  const [backfillLang, setBackfillLang] = useState<string>('Hindi');
+  const [backfillParams, setBackfillParams] = useState({
+    lookbackDays: 3650,
+    forwardDays: 365,
+    pages: 5,
+    maxIds: 120,
+    desiredTotal: 2500,
+    desiredUpcoming: 30,
+    force: true
+  });
+  const [backfillState, setBackfillState] = useState<any>(null);
   const [movieSearchQuery, setMovieSearchQuery] = useState('');
   const [movieSearchResults, setMovieSearchResults] = useState<any[]>([]);
   const [editorQuery, setEditorQuery] = useState('');
@@ -236,6 +249,25 @@ export function AdminPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setBackfillState(status?.backfill || null);
+  }, [status?.backfill]);
+
+  useEffect(() => {
+    if (!token) return;
+    const running = backfillState?.status === 'running';
+    if (!running) return;
+    const id = window.setInterval(async () => {
+      try {
+        const r = await getJson('/api/admin/backfill/status', token);
+        setBackfillState((r as any)?.backfill || null);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [token, backfillState?.status]);
 
   const lastSeedText = useMemo(() => {
     if (!status?.lastHomeSeedAt) return 'never';
@@ -548,6 +580,214 @@ export function AdminPanel({
                         ) : null}
                       </div>
                     ) : null}
+                  </div>
+
+                  <div className="detail" style={{ marginTop: 14 }}>
+                    <h4 style={{ marginTop: 0 }}>Bulk backfill</h4>
+                    <div className="tagline">
+                      Runs a longer TMDB backfill (popular bias) to grow the catalog. This can take several minutes.
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                      <select
+                        className="input"
+                        value={backfillScope}
+                        onChange={(e) => setBackfillScope(e.target.value === 'language' ? 'language' : 'all')}
+                        title="Scope"
+                        style={{ minWidth: 220 }}
+                      >
+                        <option value="all">All languages</option>
+                        <option value="language">One language</option>
+                      </select>
+
+                      {backfillScope === 'language' ? (
+                        <select
+                          className="input"
+                          value={backfillLang}
+                          onChange={(e) => setBackfillLang(e.target.value)}
+                          title="Language"
+                          style={{ minWidth: 220 }}
+                        >
+                          {ADMIN_LANGUAGE_OPTIONS.filter((l) => l !== 'Punjabi').map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+
+                      <label className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!backfillParams.force}
+                          onChange={(e) => setBackfillParams((p) => ({ ...p, force: e.target.checked }))}
+                        />
+                        Force
+                      </label>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                        gap: 10,
+                        marginTop: 12
+                      }}
+                    >
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.lookbackDays)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, lookbackDays: Number(e.target.value || 0) }))}
+                        placeholder="Lookback days"
+                        title="Lookback days"
+                      />
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.forwardDays)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, forwardDays: Number(e.target.value || 0) }))}
+                        placeholder="Forward days"
+                        title="Forward days"
+                      />
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.pages)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, pages: Number(e.target.value || 0) }))}
+                        placeholder="Pages (1-5)"
+                        title="Pages (1-5)"
+                      />
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.maxIds)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, maxIds: Number(e.target.value || 0) }))}
+                        placeholder="Max IDs (16-120)"
+                        title="Max IDs (16-120)"
+                      />
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.desiredTotal)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, desiredTotal: Number(e.target.value || 0) }))}
+                        placeholder="Desired total / lang"
+                        title="Desired total / language"
+                      />
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={String(backfillParams.desiredUpcoming)}
+                        onChange={(e) => setBackfillParams((p) => ({ ...p, desiredUpcoming: Number(e.target.value || 0) }))}
+                        placeholder="Desired upcoming / lang"
+                        title="Desired upcoming / language"
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        disabled={loading || backfillState?.status === 'running'}
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          try {
+                            const r = await postJson(
+                              '/api/admin/backfill/start',
+                              {
+                                scope: backfillScope,
+                                lang: backfillScope === 'language' ? backfillLang : '',
+                                force: !!backfillParams.force,
+                                overrides: {
+                                  lookbackDays: backfillParams.lookbackDays,
+                                  forwardDays: backfillParams.forwardDays,
+                                  pages: backfillParams.pages,
+                                  maxIds: backfillParams.maxIds,
+                                  desiredTotal: backfillParams.desiredTotal,
+                                  desiredUpcoming: backfillParams.desiredUpcoming
+                                }
+                              },
+                              token
+                            );
+                            setBackfillState((r as any)?.backfill || null);
+                            await loadStatus(token);
+                          } catch (e: any) {
+                            setError(e?.message || 'Backfill failed to start');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Start backfill
+                      </button>
+
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        disabled={loading || backfillState?.status !== 'running'}
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          try {
+                            await postJson('/api/admin/backfill/cancel', {}, token);
+                            const r = await getJson('/api/admin/backfill/status', token);
+                            setBackfillState((r as any)?.backfill || null);
+                          } catch (e: any) {
+                            setError(e?.message || 'Cancel failed');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Cancel
+                      </button>
+
+                      {backfillState?.status ? (
+                        <span className="chip" title="Backfill status">
+                          Status: {String(backfillState.status)}
+                        </span>
+                      ) : (
+                        <span className="chip" title="Backfill status">Status: idle</span>
+                      )}
+                    </div>
+
+                    {backfillState ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="meta">
+                          {backfillState.startedAt ? <span className="chip">Started: {new Date(backfillState.startedAt).toLocaleString()}</span> : null}
+                          {backfillState.finishedAt ? <span className="chip">Finished: {new Date(backfillState.finishedAt).toLocaleString()}</span> : null}
+                          {backfillState.totals ? (
+                            <>
+                              <span className="chip">Attempted: {backfillState.totals.attempted ?? 0}</span>
+                              <span className="chip">Wrote: {backfillState.totals.wrote ?? 0}</span>
+                              <span className="chip">Errors: {backfillState.totals.errors ?? 0}</span>
+                            </>
+                          ) : null}
+                        </div>
+                        {backfillState.error ? (
+                          <div className="tagline" style={{ marginTop: 10 }}>
+                            Error: {String(backfillState.error)}
+                          </div>
+                        ) : null}
+                        {Array.isArray(backfillState.results) && backfillState.results.length ? (
+                          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+                            {backfillState.results.slice(0, 12).map((x: any) => (
+                              <div key={String(x.lang)} className="chip" title="Per-language result">
+                                {x.lang}: attempted {x.attempted ?? 0}, wrote {x.wrote ?? 0}
+                                {x.error ? ' (error)' : ''}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="tagline" style={{ marginTop: 10 }}>
+                        Tip: For a 20k “popular old + new” catalog, run this a few times rather than one huge run.
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}

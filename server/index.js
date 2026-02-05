@@ -437,25 +437,50 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   const desiredUpcoming = Math.max(2, Number(process.env.LANG_SEED_DESIRED_UPCOMING || 0) || 6);
   const desiredTotal = Math.max(24, Number(process.env.LANG_SEED_DESIRED_TOTAL || 0) || 48);
   const force = opts?.force === true;
+  const overrides = opts?.overrides && typeof opts.overrides === 'object' ? opts.overrides : {};
+  const desiredUpcomingOverride =
+    overrides.desiredUpcoming != null && Number.isFinite(Number(overrides.desiredUpcoming))
+      ? Number(overrides.desiredUpcoming)
+      : null;
+  const desiredTotalOverride =
+    overrides.desiredTotal != null && Number.isFinite(Number(overrides.desiredTotal)) ? Number(overrides.desiredTotal) : null;
+  const effectiveDesiredUpcoming = desiredUpcomingOverride != null ? Math.max(2, desiredUpcomingOverride) : desiredUpcoming;
+  const effectiveDesiredTotal = desiredTotalOverride != null ? Math.max(24, desiredTotalOverride) : desiredTotal;
 
   // If we already have a decent number of titles and at least some upcoming, skip.
   // Otherwise, refresh this language in the background.
-  if (!force && haveTotal >= desiredTotal && haveUpcoming >= desiredUpcoming) return;
+  if (!force && haveTotal >= effectiveDesiredTotal && haveUpcoming >= effectiveDesiredUpcoming) return;
 
   const langKey = `last_lang_seed_at:${String(langName || '').toLowerCase()}`;
   // If we're still missing a decent catalog/upcoming shelf, retry more often.
   const langTtlMs =
-    haveTotal < desiredTotal || haveUpcoming < desiredUpcoming ? 30 * 60 * 1000 : 12 * 60 * 60 * 1000;
+    haveTotal < effectiveDesiredTotal || haveUpcoming < effectiveDesiredUpcoming ? 30 * 60 * 1000 : 12 * 60 * 60 * 1000;
   const lastLangSeedAt = metaGetNumber(langKey);
   if (!force && lastLangSeedAt && Date.now() - lastLangSeedAt < langTtlMs) return;
   // Allow backfilling older catalogs via env without code changes.
-  const lookbackDays = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
-  const forwardDays = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_FORWARD_DAYS || 0) || 365));
+  const lookbackDaysEnv = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_LOOKBACK_DAYS || 0) || 365));
+  const forwardDaysEnv = Math.max(60, Math.min(3650, Number(process.env.LANG_SEED_FORWARD_DAYS || 0) || 365));
+  const lookbackDays =
+    overrides.lookbackDays != null && Number.isFinite(Number(overrides.lookbackDays))
+      ? Math.max(60, Math.min(3650, Number(overrides.lookbackDays)))
+      : lookbackDaysEnv;
+  const forwardDays =
+    overrides.forwardDays != null && Number.isFinite(Number(overrides.forwardDays))
+      ? Math.max(60, Math.min(3650, Number(overrides.forwardDays)))
+      : forwardDaysEnv;
   const past = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const future = new Date(Date.now() + forwardDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const pages = Math.max(1, Math.min(5, Number(process.env.LANG_SEED_PAGES || 0) || 3));
-  const maxIds = Math.max(16, Math.min(120, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
+  const pagesEnv = Math.max(1, Math.min(5, Number(process.env.LANG_SEED_PAGES || 0) || 3));
+  const maxIdsEnv = Math.max(16, Math.min(120, Number(process.env.LANG_SEED_MAX_IDS || 0) || 72));
+  const pages =
+    overrides.pages != null && Number.isFinite(Number(overrides.pages))
+      ? Math.max(1, Math.min(5, Number(overrides.pages)))
+      : pagesEnv;
+  const maxIds =
+    overrides.maxIds != null && Number.isFinite(Number(overrides.maxIds))
+      ? Math.max(16, Math.min(120, Number(overrides.maxIds)))
+      : maxIdsEnv;
 
   const recentTasks = [];
   const upcomingTasks = [];
@@ -490,7 +515,9 @@ async function seedLanguageIfSparse(langName, opts = {}) {
 
   const ids = Array.from(new Set([...recentHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, maxIds);
   let wrote = 0;
+  const cancelRef = opts?.cancelRef;
   for (const tmdbId of ids) {
+    if (cancelRef?.cancelled) break;
     try {
       const full = await tmdbGetMovieFull(tmdbId);
       upsertMovieFromTmdb(db, full);
@@ -504,7 +531,7 @@ async function seedLanguageIfSparse(langName, opts = {}) {
   return { lang: langName, attempted: ids.length, wrote };
 }
 
-async function seedAllLanguages({ force = false } = {}) {
+async function seedAllLanguages({ force = false, overrides = undefined, cancelRef = undefined } = {}) {
   const key = 'last_all_languages_seed_at';
   const ttlMs = 12 * 60 * 60 * 1000;
   const last = metaGetNumber(key);
@@ -512,15 +539,17 @@ async function seedAllLanguages({ force = false } = {}) {
 
   const results = [];
   for (const lang of SUPPORTED_LANGUAGES) {
+    if (cancelRef?.cancelled) break;
     try {
-      const r = await seedLanguageIfSparse(lang, { force });
+      const r = await seedLanguageIfSparse(lang, { force, overrides, cancelRef });
       results.push(r || { lang, attempted: 0, wrote: 0 });
     } catch {
       results.push({ lang, attempted: 0, wrote: 0, error: true });
     }
   }
 
-  metaSet(key, String(Date.now()));
+  // Only update the global seed timestamp if we actually completed the run.
+  if (!cancelRef?.cancelled) metaSet(key, String(Date.now()));
   return { skipped: false, results };
 }
 
@@ -1378,6 +1407,128 @@ function homeCacheKey(lang) {
 const adminTokens = new Map(); // token -> expiresAt (ms)
 const ADMIN_TTL_MS = 24 * 60 * 60 * 1000;
 
+// Bulk backfill job (admin-triggered). Keeps state in SQLite meta for visibility after restarts.
+let backfillJob = {
+  inFlight: null,
+  cancelRef: { cancelled: false },
+  state: null
+};
+
+function backfillStateLoad() {
+  try {
+    const v = metaGet('backfill_state');
+    if (!v?.value) return null;
+    return JSON.parse(String(v.value));
+  } catch {
+    return null;
+  }
+}
+
+function backfillStateSave(state) {
+  try {
+    metaSet('backfill_state', JSON.stringify(state || {}));
+  } catch {
+    // ignore
+  }
+}
+
+function normalizeBackfillOverrides(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const num = (v) => (v == null ? null : Number(v));
+  const clampInt = (v, min, max) => {
+    const n = num(v);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(min, Math.min(max, Math.trunc(n)));
+  };
+  return {
+    lookbackDays: clampInt(o.lookbackDays, 60, 3650),
+    forwardDays: clampInt(o.forwardDays, 60, 3650),
+    pages: clampInt(o.pages, 1, 5),
+    maxIds: clampInt(o.maxIds, 16, 120),
+    desiredTotal: clampInt(o.desiredTotal, 24, 25000),
+    desiredUpcoming: clampInt(o.desiredUpcoming, 2, 5000)
+  };
+}
+
+async function startBackfill({ scope, lang, force, overrides } = {}) {
+  if (backfillJob.inFlight) return backfillJob.state || backfillStateLoad();
+
+  const safeScope = scope === 'language' ? 'language' : 'all';
+  const safeLang = String(lang || '').trim();
+  const effectiveForce = force !== false; // default true
+  const o = normalizeBackfillOverrides(overrides);
+
+  backfillJob.cancelRef = { cancelled: false };
+  const state = {
+    status: 'running',
+    scope: safeScope,
+    lang: safeScope === 'language' ? safeLang : null,
+    force: effectiveForce,
+    overrides: o,
+    startedAt: nowIso(),
+    updatedAt: nowIso(),
+    finishedAt: null,
+    cancelled: false,
+    totals: { attempted: 0, wrote: 0, errors: 0 },
+    results: []
+  };
+  backfillJob.state = state;
+  backfillStateSave(state);
+
+  backfillJob.inFlight = (async () => {
+    try {
+      if (safeScope === 'language') {
+        if (!SUPPORTED_LANGUAGES.includes(safeLang)) {
+          state.status = 'error';
+          state.finishedAt = nowIso();
+          state.updatedAt = nowIso();
+          state.error = 'unsupported_lang';
+          backfillStateSave(state);
+          return;
+        }
+        const r = await seedLanguageIfSparse(safeLang, {
+          force: effectiveForce,
+          overrides: o,
+          cancelRef: backfillJob.cancelRef
+        });
+        const rr = r || { lang: safeLang, attempted: 0, wrote: 0 };
+        state.results.push(rr);
+        state.totals.attempted += rr.attempted || 0;
+        state.totals.wrote += rr.wrote || 0;
+      } else {
+        const r = await seedAllLanguages({
+          force: effectiveForce,
+          overrides: o,
+          cancelRef: backfillJob.cancelRef
+        });
+        const results = Array.isArray(r?.results) ? r.results : [];
+        state.results = results;
+        for (const x of results) {
+          state.totals.attempted += x?.attempted || 0;
+          state.totals.wrote += x?.wrote || 0;
+          if (x?.error) state.totals.errors += 1;
+        }
+      }
+
+      if (backfillJob.cancelRef.cancelled) state.cancelled = true;
+      state.status = state.cancelled ? 'cancelled' : 'done';
+      state.updatedAt = nowIso();
+      state.finishedAt = nowIso();
+      backfillStateSave(state);
+    } catch (e) {
+      state.status = 'error';
+      state.updatedAt = nowIso();
+      state.finishedAt = nowIso();
+      state.error = String(e?.message || e || 'backfill_failed');
+      backfillStateSave(state);
+    } finally {
+      backfillJob.inFlight = null;
+    }
+  })();
+
+  return state;
+}
+
 function requireAdmin(req, res) {
   const token = String(req.headers['x-admin-token'] || '').trim();
   if (!token) {
@@ -2149,6 +2300,7 @@ app.get('/api/admin/status', (req, res) => {
     languageSeeds,
     youtubeQuotaUntilIso: ytQuotaUntilMs ? new Date(ytQuotaUntilMs).toISOString() : null,
     agentLastRun,
+    backfill: backfillJob.state || backfillStateLoad(),
     pending,
     keys: {
       tmdb: !!(process.env.TMDB_API_KEY || process.env.TMDB_BEARER_TOKEN),
@@ -2205,6 +2357,37 @@ app.post('/api/admin/seed/all-languages', async (req, res) => {
   } catch {
     return res.status(500).json({ error: 'seed_failed' });
   }
+});
+
+app.get('/api/admin/backfill/status', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  res.json({ now: nowIso(), backfill: backfillJob.state || backfillStateLoad() });
+});
+
+app.post('/api/admin/backfill/start', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const scope = String(req.body?.scope || 'all');
+  const lang = String(req.body?.lang || '').trim();
+  const force = req.body?.force !== false; // default true
+  const overrides = normalizeBackfillOverrides(req.body?.overrides || {});
+  const state = await startBackfill({ scope, lang, force, overrides });
+  res.json({ ok: true, backfill: state });
+});
+
+app.post('/api/admin/backfill/cancel', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  if (!backfillJob.inFlight) return res.json({ ok: true, cancelled: false });
+  backfillJob.cancelRef.cancelled = true;
+  if (backfillJob.state) {
+    backfillJob.state.cancelled = true;
+    backfillJob.state.updatedAt = nowIso();
+    backfillStateSave(backfillJob.state);
+  }
+  res.json({ ok: true, cancelled: true });
 });
 
 app.get('/api/admin/moderation', (req, res) => {
