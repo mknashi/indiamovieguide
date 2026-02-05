@@ -566,7 +566,9 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
   };
 
   try {
-    const row = db.prepare('SELECT tmdb_id, trailer_url, title, release_date FROM movies WHERE id = ?').get(movieId);
+    const row = db
+      .prepare('SELECT tmdb_id, trailer_url, title, release_date, status, synopsis, poster, backdrop, updated_at FROM movies WHERE id = ?')
+      .get(movieId);
     const tmdbId = row?.tmdb_id;
     if (!tmdbId) return;
 
@@ -597,10 +599,33 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       .get(movieId)?.c || 0;
     const missingCastImages = castCount > 0 && castImageCount === 0;
     const missingCast = castCount === 0;
+    const synopsis = String(row?.synopsis || '').trim();
+    const missingSynopsis = synopsis.length < 12;
+    const missingArtwork = !String(row?.poster || '').trim() && !String(row?.backdrop || '').trim();
     // Only fetch songs in real-time if we have none locally.
     // Admin can curate songs (including missing links) without being overwritten.
     const missingSongs = songCount === 0;
     const forceSongs = opts?.forceSongs === true;
+    const forceFull = opts?.forceFull === true;
+
+    const storedStatus = String(row?.status || '').trim();
+    const inferredStatus = statusFrom(row?.release_date, offerCount > 0);
+    const status = storedStatus || inferredStatus;
+    const isUpcoming = status === 'Upcoming' || status === 'Announced';
+    const lastUpdatedMs = (() => {
+      const t = Date.parse(String(row?.updated_at || ''));
+      return Number.isFinite(t) ? t : 0;
+    })();
+
+    const UPCOMING_TTL_HOURS = Math.max(
+      1,
+      Math.min(168, Number(process.env.UPCOMING_DETAILS_REFRESH_HOURS || 0) || 24)
+    ); // default 24h, max 7 days
+    const DEFAULT_TTL_HOURS = Math.max(
+      6,
+      Math.min(24 * 90, Number(process.env.DETAILS_REFRESH_HOURS || 0) || 24 * 30)
+    ); // default 30 days
+    const ttlMs = (isUpcoming ? UPCOMING_TTL_HOURS : DEFAULT_TTL_HOURS) * 60 * 60 * 1000;
 
     if (debugSongs && (forceSongs || missingSongs)) {
       slog('enrich start', {
@@ -614,16 +639,27 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       });
     }
 
+    const needsFull =
+      missingTrailer ||
+      offerCount === 0 ||
+      ratingCount === 0 ||
+      reviewCount === 0 ||
+      missingSongs ||
+      missingCastImages ||
+      missingCast ||
+      (isUpcoming && (missingSynopsis || missingArtwork));
+
     if (
-      !missingTrailer &&
-      offerCount > 0 &&
-      ratingCount > 0 &&
-      reviewCount > 0 &&
-      !missingSongs &&
-      !missingCastImages &&
-      !missingCast
+      !needsFull
     )
       return;
+
+    // Avoid hammering TMDB for sparse upcoming titles on every page load.
+    // If details are missing but we refreshed recently, wait for the TTL unless forced.
+    if (!forceFull && lastUpdatedMs && Date.now() - lastUpdatedMs < ttlMs) {
+      // Still allow song refresh if explicitly forced (admin) even inside TTL.
+      if (!(forceSongs && (missingSongs || opts?.overrideAdminSongs === true))) return;
+    }
 
     const full = await tmdbGetMovieFull(tmdbId);
     upsertMovieFromTmdb(db, full);
@@ -2905,6 +2941,90 @@ app.get('/api/admin/movies-search', (req, res) => {
       poster: m.poster || ''
     }))
   });
+});
+
+// List incomplete movies for admin cleanup (e.g. upcoming missing synopsis/cast/artwork).
+// NOTE: keep path non-overlapping with `/api/admin/movies/:id`.
+app.get('/api/admin/movies-incomplete', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const status = String(req.query.status || 'Upcoming').trim();
+  const lang = String(req.query.lang || '').trim();
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 60) || 60));
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        m.id,
+        m.tmdb_id,
+        m.title,
+        m.language,
+        m.release_date,
+        m.status,
+        m.poster,
+        m.backdrop,
+        m.synopsis,
+        m.updated_at,
+        (SELECT COUNT(*) FROM movie_cast mc WHERE mc.movie_id = m.id) as cast_count
+      FROM movies m
+      WHERE COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(m.language) = lower(?))
+        AND (? = '' OR lower(m.status) = lower(?))
+        AND (
+          length(trim(COALESCE(m.synopsis, ''))) < 12
+          OR (trim(COALESCE(m.poster, '')) = '' AND trim(COALESCE(m.backdrop, '')) = '')
+          OR (SELECT COUNT(*) FROM movie_cast mc WHERE mc.movie_id = m.id) = 0
+        )
+      ORDER BY
+        CASE WHEN m.release_date IS NULL OR m.release_date = '' THEN 1 ELSE 0 END,
+        COALESCE(m.release_date, '9999-99-99') ASC,
+        COALESCE(m.updated_at, m.created_at) DESC
+      LIMIT ?
+    `
+    )
+    .all(lang, lang, status, status, limit)
+    .map((r) => {
+      const synopsisLen = String(r.synopsis || '').trim().length;
+      const hasArtwork = !!String(r.poster || '').trim() || !!String(r.backdrop || '').trim();
+      return {
+        id: r.id,
+        tmdbId: r.tmdb_id || undefined,
+        title: r.title,
+        language: r.language || '',
+        releaseDate: r.release_date || '',
+        status: r.status || '',
+        poster: r.poster || '',
+        updatedAt: r.updated_at || '',
+        missing: {
+          synopsis: synopsisLen < 12,
+          artwork: !hasArtwork,
+          cast: Number(r.cast_count || 0) === 0
+        }
+      };
+    });
+
+  res.json({ now: nowIso(), status, lang: lang || null, movies: rows });
+});
+
+app.post('/api/admin/movies/:id/refresh', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const movieId = normalizeMovieIdInput(req.params.id);
+  const exists = db.prepare('SELECT id FROM movies WHERE id = ?').get(movieId);
+  if (!exists) return res.status(404).json({ error: 'not_found' });
+
+  const forceSongs = req.body?.forceSongs === true;
+  try {
+    await enrichMovieIfNeeded(movieId, { forceFull: true, forceSongs });
+  } catch {
+    // ignore
+  }
+
+  const movie = hydrateMovie(db, movieId);
+  res.json({ ok: true, movieId, movie });
 });
 
 app.post('/api/admin/movies/:id/cast/add', async (req, res) => {

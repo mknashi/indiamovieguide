@@ -173,6 +173,9 @@ export function AdminPanel({
   const [personResults, setPersonResults] = useState<any[]>([]);
   const [castAdd, setCastAdd] = useState({ personId: '', character: '', billingOrder: '' });
   const [castDrafts, setCastDrafts] = useState<Record<string, { character: string; billingOrder: string }>>({});
+  const [incompleteStatus, setIncompleteStatus] = useState<'Upcoming' | 'Announced' | 'Now Showing' | 'Streaming'>('Upcoming');
+  const [incompleteLang, setIncompleteLang] = useState<string>('');
+  const [incompleteMovies, setIncompleteMovies] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -866,6 +869,145 @@ export function AdminPanel({
               <div className="detail">
                 <div className="tagline">
                   Manage local catalog data. Edits are saved to SQLite and won&apos;t be overwritten by auto-enrichment.
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <div className="tagline">Find incomplete movies (missing synopsis/artwork/cast)</div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                    <select
+                      className="input"
+                      value={incompleteStatus}
+                      onChange={(e) =>
+                        setIncompleteStatus(
+                          (['Upcoming', 'Announced', 'Now Showing', 'Streaming'].includes(e.target.value)
+                            ? e.target.value
+                            : 'Upcoming') as any
+                        )
+                      }
+                      style={{ minWidth: 220 }}
+                      title="Status"
+                    >
+                      <option value="Upcoming">Upcoming</option>
+                      <option value="Announced">Announced</option>
+                      <option value="Now Showing">Now Showing</option>
+                      <option value="Streaming">Streaming</option>
+                    </select>
+
+                    <select
+                      className="input"
+                      value={incompleteLang}
+                      onChange={(e) => setIncompleteLang(e.target.value)}
+                      style={{ minWidth: 220 }}
+                      title="Language"
+                    >
+                      <option value="">All languages</option>
+                      {ADMIN_LANGUAGE_OPTIONS.filter((l) => l !== 'Punjabi').map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={async () => {
+                        if (!token) return;
+                        setLoading(true);
+                        setError(null);
+                        try {
+                          const qp = new URLSearchParams();
+                          qp.set('status', incompleteStatus);
+                          if (incompleteLang) qp.set('lang', incompleteLang);
+                          qp.set('limit', '60');
+                          const r = await getJson(`/api/admin/movies-incomplete?${qp.toString()}`, token);
+                          setIncompleteMovies(Array.isArray((r as any)?.movies) ? (r as any).movies : []);
+                        } catch (e: any) {
+                          setError(e?.message || 'Load failed');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                    >
+                      Load list
+                    </button>
+                  </div>
+
+                  {incompleteMovies.length ? (
+                    <div className="song-list" style={{ marginTop: 10 }}>
+                      {incompleteMovies.slice(0, 60).map((m) => (
+                        <div key={m.id} className="song" style={{ alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr', gap: 12, flex: 1 }}>
+                            {m.poster ? (
+                              <img
+                                src={m.poster}
+                                alt=""
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  borderRadius: 12,
+                                  objectFit: 'cover',
+                                  border: '1px solid rgba(255,255,255,0.10)'
+                                }}
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="chip" style={{ width: 44, height: 44, borderRadius: 12 }} />
+                            )}
+                            <div>
+                              <strong>{m.title}</strong>
+                              <div className="tagline" style={{ marginTop: 4 }}>
+                                {(m.language ? m.language : 'Unknown') +
+                                  (m.releaseDate ? ` · ${m.releaseDate}` : '') +
+                                  (m.tmdbId ? ` · tmdb:${m.tmdbId}` : '')}
+                              </div>
+                              <div className="meta" style={{ marginTop: 6 }}>
+                                {m.missing?.synopsis ? <span className="chip">Missing synopsis</span> : null}
+                                {m.missing?.artwork ? <span className="chip">Missing artwork</span> : null}
+                                {m.missing?.cast ? <span className="chip">Missing cast</span> : null}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={async () => {
+                                if (!token) return;
+                                setLoading(true);
+                                setError(null);
+                                try {
+                                  await postJson(`/api/admin/movies/${encodeURIComponent(String(m.id))}/refresh`, {}, token);
+                                  const qp = new URLSearchParams();
+                                  qp.set('status', incompleteStatus);
+                                  if (incompleteLang) qp.set('lang', incompleteLang);
+                                  qp.set('limit', '60');
+                                  const r = await getJson(`/api/admin/movies-incomplete?${qp.toString()}`, token);
+                                  setIncompleteMovies(Array.isArray((r as any)?.movies) ? (r as any).movies : []);
+                                } catch (e: any) {
+                                  setError(e?.message || 'Refresh failed');
+                                } finally {
+                                  setLoading(false);
+                                }
+                              }}
+                            >
+                              Refresh
+                            </button>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={async () => {
+                                if (!token) return;
+                                await loadEditor(token, String(m.id));
+                              }}
+                            >
+                              Load
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div style={{ marginTop: 12 }}>
