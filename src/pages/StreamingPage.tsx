@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { RiInformationLine } from 'react-icons/ri';
 import { Movie } from '../types';
 import { navigate } from '../router';
 import { MovieCard } from '../components/MovieCard';
@@ -79,6 +80,15 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
   const lastVerifiedText = payload?.lastVerifiedAt
     ? new Date(String(payload.lastVerifiedAt)).toLocaleString()
     : 'Unknown';
+  const freshness = (() => {
+    if (!payload?.lastVerifiedAt) return 'unknown';
+    const t = Date.parse(String(payload.lastVerifiedAt));
+    if (!Number.isFinite(t)) return 'unknown';
+    const hours = (Date.now() - t) / (1000 * 60 * 60);
+    if (hours <= 24) return 'fresh';
+    if (hours <= 72) return 'warm';
+    return 'stale';
+  })();
 
   return (
     <div>
@@ -91,9 +101,9 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
       </div>
 
       <div className="detail" style={{ marginTop: 14 }}>
-        <div className="meta" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <div className="provider-seg" role="tablist" aria-label="Streaming platforms">
           <button
-            className={`chip ${!activeProvider ? 'chip-active' : ''}`}
+            className={`provider-pill ${!activeProvider ? 'is-active' : ''}`}
             type="button"
             onClick={() => {
               setActiveProvider('');
@@ -109,7 +119,7 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
           {providers.slice(0, 14).map((p) => (
             <button
               key={p.provider}
-              className={`chip ${activeProvider === p.provider ? 'chip-active' : ''}`}
+              className={`provider-pill ${activeProvider === p.provider ? 'is-active' : ''}`}
               type="button"
               style={{ display: 'inline-flex', alignItems: 'center' }}
               onClick={() => {
@@ -120,7 +130,11 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
                 qs.set('provider', p.provider);
                 navigate(`/streaming?${qs.toString()}`);
               }}
-              title={p.lastVerifiedAt ? `Last verified: ${new Date(p.lastVerifiedAt).toLocaleString()}` : p.provider}
+              title={
+                p.lastVerifiedAt
+                  ? `Last verified: ${new Date(p.lastVerifiedAt).toLocaleString()}`
+                  : `${p.provider} (no verification timestamp yet)`
+              }
             >
               {p.logo ? (
                 <img
@@ -136,7 +150,20 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
         </div>
 
         <div className="tagline" style={{ marginTop: 10 }}>
-          Region: <strong>{payload?.filters?.region || 'IN'}</strong> · Last verified: <strong>{lastVerifiedText}</strong>
+          <span className={`verified-badge ${freshness}`}>
+            {freshness === 'fresh' ? 'Verified <24h' : freshness === 'warm' ? 'Verified <72h' : freshness === 'stale' ? 'Stale' : 'Unverified'}
+          </span>
+          <span style={{ marginLeft: 10 }}>
+            Region: <strong>{payload?.filters?.region || 'IN'}</strong> · Last verified: <strong>{lastVerifiedText}</strong>
+          </span>
+          <span
+            className="chip"
+            style={{ marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'help' }}
+            title="Availability comes from TMDB watch/providers (JustWatch-backed) and is cached. Streaming catalogs can change at any time."
+          >
+            <RiInformationLine size={14} />
+            Data source
+          </span>
           <span style={{ opacity: 0.75 }}>
             {' '}
             (cached availability can change; open movie details to refresh in the background)
@@ -152,7 +179,7 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
           {movies.length ? (
             <div className="grid" style={{ marginTop: 14 }}>
               {movies.map((m) => (
-                <MovieCard key={m.id} movie={m} />
+                <MovieCard key={m.id} movie={m} contextProvider={activeProvider || undefined} />
               ))}
             </div>
           ) : (

@@ -17,10 +17,21 @@ const formatDate = (iso?: string) => {
   return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-export function MovieCard({ movie }: { movie: Movie }) {
+export function MovieCard({ movie, contextProvider }: { movie: Movie; contextProvider?: string }) {
   const href = moviePathFromMovieId(movie.id);
   const synopsis = (movie.synopsis || '').trim();
   const showMore = synopsis.length > 180;
+  const streamingOffers = (movie.ott || []).filter((o) => String(o.type || '').toLowerCase() === 'streaming');
+  const primaryStreaming = (() => {
+    if (contextProvider) {
+      const hit = streamingOffers.find(
+        (o) => String(o.provider || '').toLowerCase() === String(contextProvider).toLowerCase()
+      );
+      if (hit) return hit;
+    }
+    return streamingOffers[0] || null;
+  })();
+  const ottVerifiedText = movie.ottLastVerifiedAt ? new Date(movie.ottLastVerifiedAt).toLocaleString() : '';
 
   const directUrlForOffer = (provider: string) => {
     const p = provider.toLowerCase();
@@ -42,6 +53,23 @@ export function MovieCard({ movie }: { movie: Movie }) {
 
   return (
     <article className="card">
+      {primaryStreaming ? (
+        <div
+          className="card-streaming-badge"
+          title={
+            `Streaming on ${primaryStreaming.provider}` +
+            (ottVerifiedText ? ` · Last verified: ${ottVerifiedText}` : '')
+          }
+        >
+          {primaryStreaming.logo ? (
+            <img src={primaryStreaming.logo} alt="" loading="lazy" />
+          ) : (
+            <RiTv2Line size={14} />
+          )}
+          <span style={{ fontWeight: 800 }}>{primaryStreaming.provider}</span>
+          <span style={{ opacity: 0.8 }}>Streaming</span>
+        </div>
+      ) : null}
       <a
         href={href}
         onClick={(e) => {
@@ -50,8 +78,8 @@ export function MovieCard({ movie }: { movie: Movie }) {
           navigate(href);
         }}
       >
-        <img src={movie.backdrop || movie.poster} alt={movie.title} loading="lazy" />
-      </a>
+	        <img src={movie.backdrop || movie.poster} alt={movie.title} loading="lazy" />
+	      </a>
 
       <div className="card-body">
         <div className="meta">
