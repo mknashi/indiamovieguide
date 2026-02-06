@@ -2,6 +2,7 @@ import type { MouseEvent } from 'react';
 
 export type Route =
   | { name: 'home'; lang?: string; refresh?: boolean }
+  | { name: 'streaming'; lang?: string; provider?: string }
   | { name: 'search'; q: string }
   | { name: 'movie'; id: string }
   | { name: 'movie_reviews'; id: string }
@@ -26,6 +27,11 @@ export function parseRoute(loc: Location = window.location): Route {
     const lang = params.get('lang') || undefined;
     const refresh = params.get('refresh') === '1' || params.get('refresh') === 'true';
     return { name: 'home', ...(lang ? { lang } : {}), ...(refresh ? { refresh: true } : {}) };
+  }
+  if (path === '/streaming') {
+    const lang = params.get('lang') || undefined;
+    const provider = params.get('provider') || undefined;
+    return { name: 'streaming', ...(lang ? { lang } : {}), ...(provider ? { provider } : {}) };
   }
   if (path === '/search') {
     return { name: 'search', q: params.get('q') || '' };

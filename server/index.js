@@ -20,6 +20,7 @@ import {
   defaultIndianLanguageCodes,
   tmdbDiscoverMovies,
   tmdbGetMovieFull,
+  tmdbGetMovieOffers,
   tmdbGetPersonFull,
   tmdbSearchMovie,
   tmdbSearchPerson
@@ -665,6 +666,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     const forceFull = opts?.forceFull === true;
     // Only auto-refresh songs on explicit movie page loads (to limit provider usage).
     const autoSongs = opts?.autoSongs === true;
+    const autoOtt = opts?.autoOtt === true;
     const needsSongsRefresh = autoSongs && (missingSongs || missingPlayableSongs) && adminSongCount === 0;
 
     const storedStatus = String(row?.status || '').trim();
@@ -685,6 +687,17 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       Math.min(24 * 90, Number(process.env.DETAILS_REFRESH_HOURS || 0) || 24 * 30)
     ); // default 30 days
     const ttlMs = (isUpcoming ? UPCOMING_TTL_HOURS : DEFAULT_TTL_HOURS) * 60 * 60 * 1000;
+
+    // OTT availability can change quickly. Refresh offers on a shorter cadence than full details.
+    const OTT_TTL_HOURS = Math.max(6, Math.min(24 * 30, Number(process.env.OTT_REFRESH_HOURS || 0) || 72)); // default 72h
+    const ottTtlMs = OTT_TTL_HOURS * 60 * 60 * 1000;
+    const ottAttemptKey = `last_ott_auto_attempt_at:${movieId}`;
+    const ottSuccessKey = `last_ott_auto_success_at:${movieId}`;
+    const lastOttAttemptAt = metaGetNumber(ottAttemptKey);
+    const lastOttSuccessAt = metaGetNumber(ottSuccessKey);
+    const canAttemptOtt = !lastOttAttemptAt || Date.now() - lastOttAttemptAt > 10 * 60 * 1000; // 10m
+    const ottStale = !lastOttSuccessAt || Date.now() - lastOttSuccessAt > ottTtlMs;
+    const needsOttRefresh = autoOtt && canAttemptOtt && ottStale;
 
     const SONGS_AUTO_TTL_HOURS = Math.max(
       1,
@@ -727,7 +740,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       missingCast ||
       (isUpcoming && (missingSynopsis || missingArtwork));
 
-    const needsFull = needsFullNonSongs || needsSongsRefresh || forceSongs;
+    const needsFull = needsFullNonSongs || needsOttRefresh || needsSongsRefresh || forceSongs;
     if (!needsFull) return;
 
     // Extracted helper so we can refresh songs without a full TMDB fetch when appropriate.
@@ -974,7 +987,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 
     // Avoid hammering TMDB for sparse upcoming titles on every page load.
     // If details are missing but we refreshed recently, wait for the TTL unless forced.
-    if (!needsFullNonSongs) {
+    if (!needsFullNonSongs && !needsOttRefresh) {
       // Songs-only refresh path: do not call TMDB if everything else is already present.
       const castNames = db
         .prepare(
@@ -1027,6 +1040,11 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 
     const full = await tmdbGetMovieFull(tmdbId);
     upsertMovieFromTmdb(db, full);
+    // Mark OTT refresh success when we've pulled a fresh TMDB payload (offers are re-written during upsert).
+    if (autoOtt || forceFull) {
+      metaSet(ottAttemptKey, String(Date.now()));
+      metaSet(ottSuccessKey, String(Date.now()));
+    }
 
     if (!full.trailerUrl) {
       const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
@@ -1642,6 +1660,207 @@ function backfillStateSave(state) {
   } catch {
     // ignore
   }
+}
+
+// OTT refresh job (admin-triggered). Refreshes watch/provider availability from TMDB (JustWatch-backed).
+let ottRefreshJob = {
+  inFlight: null,
+  cancelRef: { cancelled: false },
+  state: null
+};
+
+function ottRefreshStateLoad() {
+  try {
+    const v = metaGet('ott_refresh_state');
+    if (!v?.value) return null;
+    return JSON.parse(String(v.value));
+  } catch {
+    return null;
+  }
+}
+
+function ottRefreshStateSave(state) {
+  try {
+    metaSet('ott_refresh_state', JSON.stringify(state || {}));
+  } catch {
+    // ignore
+  }
+}
+
+function normalizeOttRefreshOverrides(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const num = (v) => (v == null ? null : Number(v));
+  const clampInt = (v, min, max) => {
+    const n = num(v);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(min, Math.min(max, Math.trunc(n)));
+  };
+  const safeRegion = String(o.region || '').trim().toUpperCase();
+  return {
+    region: safeRegion && /^[A-Z]{2}$/.test(safeRegion) ? safeRegion : null,
+    limit: clampInt(o.limit, 10, 5000),
+    concurrency: clampInt(o.concurrency, 1, 8),
+    staleHours: clampInt(o.staleHours, 6, 24 * 30),
+    onlyStale: o.onlyStale !== false
+  };
+}
+
+function replaceOttOffersForMovie(movieId, offers, { source = 'tmdb' } = {}) {
+  const id = String(movieId || '').trim();
+  if (!id) return 0;
+  const ts = nowIso();
+  db.prepare('DELETE FROM ott_offers WHERE movie_id = ?').run(id);
+  let wrote = 0;
+  for (const o of offers || []) {
+    const offerId = hashId('ott', `${id}:${o.provider}:${o.type}:${o.region || ''}`);
+    db.prepare(
+      `
+      INSERT OR REPLACE INTO ott_offers (
+        id, movie_id, provider, offer_type, url, logo, region, source, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    ).run(offerId, id, o.provider, o.type, o.url || '', o.logo || '', o.region || '', source, ts);
+    wrote++;
+  }
+  return wrote;
+}
+
+async function refreshOttForLanguage(langName, opts = {}) {
+  const lang = String(langName || '').trim();
+  const region = String(opts.region || process.env.OTT_REGION || 'IN').trim().toUpperCase();
+  const limit = Number.isFinite(Number(opts.limit)) ? Number(opts.limit) : 200;
+  const concurrency = Number.isFinite(Number(opts.concurrency)) ? Number(opts.concurrency) : 3;
+  const staleHours = Number.isFinite(Number(opts.staleHours))
+    ? Number(opts.staleHours)
+    : Math.max(6, Math.min(24 * 30, Number(process.env.OTT_REFRESH_HOURS || 0) || 72));
+  const onlyStale = opts.onlyStale !== false;
+  const cancelRef = opts.cancelRef;
+
+  const cutoffIso = new Date(Date.now() - staleHours * 60 * 60 * 1000).toISOString();
+  const rows = onlyStale
+    ? db
+        .prepare(
+          `
+          SELECT m.id as id, m.tmdb_id as tmdb_id, MAX(o.created_at) as last_offer_at, COUNT(o.id) as c
+          FROM movies m
+          LEFT JOIN ott_offers o ON o.movie_id = m.id
+          WHERE m.tmdb_id IS NOT NULL
+            AND COALESCE(m.is_indian, 1) = 1
+            AND (? = '' OR lower(m.language) = lower(?))
+          GROUP BY m.id
+          HAVING c = 0 OR last_offer_at IS NULL OR last_offer_at < ?
+          ORDER BY COALESCE(last_offer_at, '0000-00-00') ASC
+          LIMIT ?
+        `
+        )
+        .all(lang, lang, cutoffIso, limit)
+    : db
+        .prepare(
+          `
+          SELECT m.id as id, m.tmdb_id as tmdb_id
+          FROM movies m
+          WHERE m.tmdb_id IS NOT NULL
+            AND COALESCE(m.is_indian, 1) = 1
+            AND (? = '' OR lower(m.language) = lower(?))
+          ORDER BY COALESCE(m.updated_at, '0000-00-00') ASC
+          LIMIT ?
+        `
+        )
+        .all(lang, lang, limit);
+
+  let attempted = 0;
+  let wrote = 0;
+  let errors = 0;
+
+  const pending = new Set();
+  const runOne = async (r) => {
+    if (cancelRef?.cancelled) return;
+    attempted++;
+    try {
+      const tmdbId = Number(r.tmdb_id);
+      if (!Number.isFinite(tmdbId)) return;
+      const offersRes = await tmdbGetMovieOffers(tmdbId, { region }).catch(() => null);
+      const offers = offersRes?.offers || [];
+      replaceOttOffersForMovie(r.id, offers, { source: 'tmdb' });
+      // Mark best-effort success (even if 0 offers; that clears stale entries).
+      metaSet(`last_ott_auto_attempt_at:${r.id}`, String(Date.now()));
+      metaSet(`last_ott_auto_success_at:${r.id}`, String(Date.now()));
+      wrote++;
+    } catch {
+      errors++;
+    }
+  };
+
+  for (const r of rows) {
+    if (cancelRef?.cancelled) break;
+    const p = runOne(r).finally(() => pending.delete(p));
+    pending.add(p);
+    if (pending.size >= concurrency) await Promise.race(pending);
+  }
+  await Promise.all(pending);
+
+  return { lang, attempted, wrote, errors, cutoffIso, region };
+}
+
+async function startOttRefresh({ scope, lang, overrides } = {}) {
+  if (ottRefreshJob.inFlight) return ottRefreshJob.state || ottRefreshStateLoad();
+
+  const safeScope = scope === 'language' ? 'language' : 'all';
+  const safeLang = String(lang || '').trim();
+  const o = normalizeOttRefreshOverrides(overrides);
+  const langs = safeScope === 'language' ? [safeLang || 'Hindi'] : SUPPORTED_LANGUAGES.slice();
+
+  ottRefreshJob.cancelRef = { cancelled: false };
+  const state = {
+    status: 'running',
+    scope: safeScope,
+    lang: safeScope === 'language' ? safeLang : null,
+    overrides: o,
+    startedAt: nowIso(),
+    updatedAt: nowIso(),
+    finishedAt: null,
+    cancelled: false,
+    totals: { attempted: 0, wrote: 0, errors: 0 },
+    results: []
+  };
+  ottRefreshJob.state = state;
+  ottRefreshStateSave(state);
+
+  ottRefreshJob.inFlight = (async () => {
+    try {
+      for (const l of langs) {
+        if (ottRefreshJob.cancelRef.cancelled) break;
+        const r = await refreshOttForLanguage(l, {
+          region: o.region || undefined,
+          limit: o.limit || undefined,
+          concurrency: o.concurrency || undefined,
+          staleHours: o.staleHours || undefined,
+          onlyStale: o.onlyStale !== false,
+          cancelRef: ottRefreshJob.cancelRef
+        });
+        state.results.push(r);
+        state.totals.attempted += r.attempted || 0;
+        state.totals.wrote += r.wrote || 0;
+        state.totals.errors += r.errors || 0;
+        state.updatedAt = nowIso();
+        ottRefreshStateSave(state);
+      }
+      if (ottRefreshJob.cancelRef.cancelled) state.cancelled = true;
+      state.status = state.cancelled ? 'cancelled' : 'finished';
+      state.finishedAt = nowIso();
+      state.updatedAt = nowIso();
+      ottRefreshStateSave(state);
+    } catch (e) {
+      state.status = 'error';
+      state.error = String(e?.message || e || 'ott_refresh_failed');
+      state.updatedAt = nowIso();
+      ottRefreshStateSave(state);
+    } finally {
+      ottRefreshJob.inFlight = null;
+    }
+  })();
+
+  return state;
 }
 
 function normalizeBackfillOverrides(raw) {
@@ -2507,21 +2726,22 @@ app.get('/api/admin/status', (req, res) => {
       .get().c
   };
 
-  res.json({
-    now: nowIso(),
-    dbPath,
-    counts,
+	  res.json({
+	    now: nowIso(),
+	    dbPath,
+	    counts,
     lastHomeSeedAt: safeLastHomeSeedAtMs,
     lastHomeSeedAtIso: safeLastHomeSeedAtMs ? new Date(safeLastHomeSeedAtMs).toISOString() : null,
     lastAllLanguagesSeedAtIso: allLangSeedMs ? new Date(allLangSeedMs).toISOString() : null,
     languageSeeds,
-    youtubeQuotaUntilIso: ytQuotaUntilMs ? new Date(ytQuotaUntilMs).toISOString() : null,
-    agentLastRun,
-    backfill: backfillJob.state || backfillStateLoad(),
-    pending,
-    keys: {
-      tmdb: !!(process.env.TMDB_API_KEY || process.env.TMDB_BEARER_TOKEN),
-      youtube: !!process.env.YOUTUBE_API_KEY,
+	    youtubeQuotaUntilIso: ytQuotaUntilMs ? new Date(ytQuotaUntilMs).toISOString() : null,
+	    agentLastRun,
+	    backfill: backfillJob.state || backfillStateLoad(),
+	    ottRefresh: ottRefreshJob.state || ottRefreshStateLoad(),
+	    pending,
+	    keys: {
+	      tmdb: !!(process.env.TMDB_API_KEY || process.env.TMDB_BEARER_TOKEN),
+	      youtube: !!process.env.YOUTUBE_API_KEY,
       omdb: !!process.env.OMDB_API_KEY
     }
   });
@@ -2603,6 +2823,35 @@ app.post('/api/admin/backfill/cancel', (req, res) => {
     backfillJob.state.cancelled = true;
     backfillJob.state.updatedAt = nowIso();
     backfillStateSave(backfillJob.state);
+  }
+  res.json({ ok: true, cancelled: true });
+});
+
+app.get('/api/admin/ott-refresh/status', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  res.json({ now: nowIso(), ottRefresh: ottRefreshJob.state || ottRefreshStateLoad() });
+});
+
+app.post('/api/admin/ott-refresh/start', async (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  const scope = req.body?.scope;
+  const lang = req.body?.lang;
+  const overrides = req.body?.overrides;
+  const state = await startOttRefresh({ scope, lang, overrides });
+  res.json({ ok: true, ottRefresh: state });
+});
+
+app.post('/api/admin/ott-refresh/cancel', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  if (!ottRefreshJob.inFlight) return res.json({ ok: true, cancelled: false });
+  ottRefreshJob.cancelRef.cancelled = true;
+  if (ottRefreshJob.state) {
+    ottRefreshJob.state.cancelled = true;
+    ottRefreshJob.state.updatedAt = nowIso();
+    ottRefreshStateSave(ottRefreshJob.state);
   }
   res.json({ ok: true, cancelled: true });
 });
@@ -3730,7 +3979,7 @@ app.get('/api/movies/:id', async (req, res) => {
       try {
         const full = await tmdbGetMovieFull(tmdbId);
         movieId = upsertMovieFromTmdb(db, full);
-        await enrichMovieIfNeeded(movieId, { debug, autoSongs: true });
+        await enrichMovieIfNeeded(movieId, { debug, autoSongs: true, autoOtt: true });
         movie = hydrateMovie(db, movieId);
       } catch {
         // ignore
@@ -3740,15 +3989,17 @@ app.get('/api/movies/:id', async (req, res) => {
     // Optional override for ambiguous titles:
     // /api/movies/1448170?refresh=1&wikiTitle=Champion_(2025_film)
     await enrichMovieIfNeeded(movieId, {
+      forceFull: true,
       forceSongs: true,
       wikiTitleOverride: safeWikiTitle ? safeWikiTitle.replace(/_/g, ' ') : '',
-      debug
+      debug,
+      autoOtt: true
     });
     movie = hydrateMovie(db, movieId);
   } else {
     // On normal movie page loads, opportunistically fill any missing OTT/songs/trailer/cast/rating.
     // Do not block the response on provider calls; enrich in the background and return the cached DB payload.
-    enqueueMovieEnrich(movieId, { debug, autoSongs: true });
+    enqueueMovieEnrich(movieId, { debug, autoSongs: true, autoOtt: true });
     movie = hydrateMovie(db, movieId);
   }
 
@@ -3983,6 +4234,86 @@ app.get('/api/browse', async (req, res) => {
     total,
     hasMore: offset + ids.length < total,
     filters: { lang: lang || null, genre: genre || null }
+  });
+});
+
+// "Streaming now" browse: reads from local DB (ott_offers) and does not block on provider calls.
+// Accuracy depends on how recently offers were refreshed for each movie.
+app.get('/api/streaming', (req, res) => {
+  const provider = String(req.query.provider || '').trim();
+  const lang = String(req.query.lang || '').trim();
+  const genre = String(req.query.genre || '').trim();
+  const region = String(req.query.region || '').trim() || 'IN';
+  const page = Math.max(1, Math.trunc(Number(req.query.page || 1) || 1));
+  const pageSize = Math.max(6, Math.min(48, Math.trunc(Number(req.query.pageSize || 24) || 24)));
+  const offset = (page - 1) * pageSize;
+
+  const where = `
+    FROM ott_offers o
+    JOIN movies m ON m.id = o.movie_id
+    LEFT JOIN movie_genres mg ON mg.movie_id = m.id
+    WHERE o.offer_type = 'Streaming'
+      AND COALESCE(m.is_indian, 1) = 1
+      AND (? = '' OR lower(o.provider) = lower(?))
+      AND (? = '' OR lower(m.language) = lower(?))
+      AND (? = '' OR lower(mg.genre) = lower(?))
+      AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
+  `;
+  const args = [provider, provider, lang, lang, genre, genre, region, region];
+
+  const totalRow = db.prepare(`SELECT COUNT(DISTINCT m.id) as c ${where}`).get(...args);
+  const total = Number(totalRow?.c || 0) || 0;
+  const lastVerifiedRow = db.prepare(`SELECT MAX(o.created_at) as t ${where}`).get(...args);
+  const lastVerifiedAt = lastVerifiedRow?.t || null;
+
+  const ids = db
+    .prepare(
+      `
+      SELECT DISTINCT m.id as id
+      ${where}
+      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
+      LIMIT ? OFFSET ?
+    `
+    )
+    .all(...args, pageSize, offset)
+    .map((r) => r.id);
+
+  const providers = db
+    .prepare(
+      `
+      SELECT o.provider as provider,
+             COUNT(DISTINCT m.id) as c,
+             MAX(CASE WHEN COALESCE(o.logo, '') != '' THEN o.logo ELSE NULL END) as logo,
+             MAX(o.created_at) as last_verified_at
+      FROM ott_offers o
+      JOIN movies m ON m.id = o.movie_id
+      WHERE o.offer_type = 'Streaming'
+        AND COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(m.language) = lower(?))
+        AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
+      GROUP BY o.provider
+      ORDER BY c DESC, o.provider ASC
+      LIMIT 30
+    `
+    )
+    .all(lang, lang, region, region)
+    .map((r) => ({
+      provider: r.provider,
+      count: Number(r.c || 0) || 0,
+      logo: r.logo || undefined,
+      lastVerifiedAt: r.last_verified_at || undefined
+    }));
+
+  res.json({
+    generatedAt: nowIso(),
+    filters: { provider: provider || null, lang: lang || null, genre: genre || null, region: region || null },
+    providers,
+    lastVerifiedAt,
+    movies: ids.map((id) => hydrateMovie(db, id)).filter(Boolean),
+    page,
+    pageSize,
+    total,
+    hasMore: offset + ids.length < total
   });
 });
 

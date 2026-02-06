@@ -1,4 +1,4 @@
-import { RiSearchLine, RiUser3Line } from 'react-icons/ri';
+import { RiLiveLine, RiSearchLine, RiUser3Line } from 'react-icons/ri';
 import { useRoute } from './hooks/useRoute';
 import { navigate } from './router';
 import { useEffect, useMemo, useState } from 'react';
@@ -17,6 +17,7 @@ import { SubmitPage } from './pages/SubmitPage';
 import { TrailerPage } from './pages/TrailerPage';
 import { SongPage } from './pages/SongPage';
 import { MovieReviewsPage } from './pages/MovieReviewsPage';
+import { StreamingPage } from './pages/StreamingPage';
 
 const LANG_ORDER = [
   'All',
@@ -31,6 +32,7 @@ const LANG_ORDER = [
 
 function currentLangFromRoute(route: ReturnType<typeof useRoute>): string {
   if (route.name === 'home') return route.lang || 'All';
+  if (route.name === 'streaming') return route.lang || 'All';
   // Keep language selector available even off-home; default to All.
   return 'All';
 }
@@ -81,11 +83,28 @@ export default function App() {
             <span className="sr-only">IndiaMovieGuide</span>
           </div>
 
-          <div className="nav-top-actions">
-            <button
-              className={`icon-button ${route.name === 'search' ? 'active' : ''}`}
-              type="button"
-              onClick={() => navigate('/search')}
+	          <div className="nav-top-actions">
+	            <button
+	              className={`icon-button ${route.name === 'streaming' ? 'active' : ''}`}
+	              type="button"
+	              onClick={() => {
+	                if (route.name === 'streaming') {
+	                  navigate('/');
+	                  return;
+	                }
+	                const q = activeLang && activeLang !== 'All' ? `?lang=${encodeURIComponent(activeLang)}` : '';
+	                navigate(`/streaming${q}`);
+	              }}
+	              title="Streaming now"
+	              aria-label="Streaming now"
+	            >
+	              <RiLiveLine size={18} />
+	            </button>
+
+	            <button
+	              className={`icon-button ${route.name === 'search' ? 'active' : ''}`}
+	              type="button"
+	              onClick={() => navigate('/search')}
               title="Search"
               aria-label="Search"
             >
@@ -114,19 +133,21 @@ export default function App() {
           </div>
         </div>
 
-        <div className="nav-bottom">
-          <div className="filters">
-            {LANG_ORDER.map((l) => (
+	        <div className="nav-bottom">
+	          <div className="filters">
+	            {LANG_ORDER.map((l) => (
               <button
                 key={l}
-                className={`filter ${activeLang === l ? 'active' : ''}`}
-                onClick={() => {
-                  const url = l === 'All' ? '/' : `/?lang=${encodeURIComponent(l)}`;
-                  navigate(url);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                title={l === 'All' ? 'All languages' : `Browse ${l}`}
-              >
+	                className={`filter ${activeLang === l ? 'active' : ''}`}
+	                onClick={() => {
+	                  const isStreaming = route.name === 'streaming';
+	                  const base = isStreaming ? '/streaming' : '/';
+	                  const url = l === 'All' ? base : `${base}?lang=${encodeURIComponent(l)}`;
+	                  navigate(url);
+	                  window.scrollTo({ top: 0, behavior: 'smooth' });
+	                }}
+	                title={l === 'All' ? 'All languages' : `Browse ${l}`}
+	              >
                 {l}
               </button>
             ))}
@@ -134,10 +155,11 @@ export default function App() {
         </div>
       </nav>
 
-      <main className="app-main">
-        {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
-        {route.name === 'search' && <SearchPage q={route.q} />}
-        {route.name === 'movie' && <MoviePage id={route.id} />}
+	      <main className="app-main">
+	        {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
+	        {route.name === 'streaming' && <StreamingPage lang={route.lang} provider={route.provider} />}
+	        {route.name === 'search' && <SearchPage q={route.q} />}
+	        {route.name === 'movie' && <MoviePage id={route.id} />}
         {route.name === 'movie_reviews' && <MovieReviewsPage id={route.id} />}
         {route.name === 'trailer' && <TrailerPage id={route.id} />}
         {route.name === 'song' && <SongPage id={route.id} />}

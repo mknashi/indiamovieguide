@@ -153,6 +153,16 @@ export function AdminPanel({
     force: true
   });
   const [backfillState, setBackfillState] = useState<any>(null);
+  const [ottScope, setOttScope] = useState<'all' | 'language'>('all');
+  const [ottLang, setOttLang] = useState<string>('Hindi');
+  const [ottParams, setOttParams] = useState({
+    region: 'IN',
+    limit: 200,
+    concurrency: 3,
+    staleHours: 72,
+    onlyStale: true
+  });
+  const [ottState, setOttState] = useState<any>(null);
   const [movieSearchQuery, setMovieSearchQuery] = useState('');
   const [movieSearchResults, setMovieSearchResults] = useState<any[]>([]);
   const [editorQuery, setEditorQuery] = useState('');
@@ -259,6 +269,10 @@ export function AdminPanel({
   }, [status?.backfill]);
 
   useEffect(() => {
+    setOttState((status as any)?.ottRefresh || null);
+  }, [(status as any)?.ottRefresh]);
+
+  useEffect(() => {
     if (!token) return;
     const running = backfillState?.status === 'running';
     if (!running) return;
@@ -272,6 +286,21 @@ export function AdminPanel({
     }, 3000);
     return () => window.clearInterval(id);
   }, [token, backfillState?.status]);
+
+  useEffect(() => {
+    if (!token) return;
+    const running = ottState?.status === 'running';
+    if (!running) return;
+    const id = window.setInterval(async () => {
+      try {
+        const r = await getJson('/api/admin/ott-refresh/status', token);
+        setOttState((r as any)?.ottRefresh || null);
+      } catch {
+        // ignore
+      }
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [token, ottState?.status]);
 
   const lastSeedText = useMemo(() => {
     if (!status?.lastHomeSeedAt) return 'never';
@@ -826,6 +855,193 @@ export function AdminPanel({
                         Tip: For a 20k “popular old + new” catalog, run this a few times rather than one huge run.
                       </div>
                     )}
+                  </div>
+
+                  <div className="detail" style={{ marginTop: 14 }}>
+                    <h4 style={{ marginTop: 0 }}>Refresh OTT availability</h4>
+                    <div className="tagline">
+                      Re-fetches watch/provider availability from TMDB (JustWatch-backed) and updates the local DB. Use this when streaming links look stale.
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                      <select
+                        className="input"
+                        value={ottScope}
+                        onChange={(e) => setOttScope(e.target.value === 'language' ? 'language' : 'all')}
+                        title="Scope"
+                        style={{ minWidth: 220 }}
+                      >
+                        <option value="all">All languages</option>
+                        <option value="language">One language</option>
+                      </select>
+
+                      {ottScope === 'language' ? (
+                        <select
+                          className="input"
+                          value={ottLang}
+                          onChange={(e) => setOttLang(e.target.value)}
+                          title="Language"
+                          style={{ minWidth: 220 }}
+                        >
+                          {ADMIN_LANGUAGE_OPTIONS.filter((l) => l !== 'Punjabi').map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+
+                      <label className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!ottParams.onlyStale}
+                          onChange={(e) => setOttParams((p) => ({ ...p, onlyStale: e.target.checked }))}
+                        />
+                        Only stale
+                      </label>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                        gap: 10,
+                        marginTop: 12
+                      }}
+                    >
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Region</span>
+                        <input
+                          className="input"
+                          value={String(ottParams.region || '')}
+                          onChange={(e) => setOttParams((p) => ({ ...p, region: String(e.target.value || '').toUpperCase() }))}
+                          placeholder="IN"
+                          title="TMDB watch/providers region (e.g. IN, US)."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Stale hours</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(ottParams.staleHours)}
+                          onChange={(e) => setOttParams((p) => ({ ...p, staleHours: Number(e.target.value || 0) }))}
+                          placeholder="72"
+                          title="Refresh titles whose OTT offers were last fetched before this cutoff."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Limit</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(ottParams.limit)}
+                          onChange={(e) => setOttParams((p) => ({ ...p, limit: Number(e.target.value || 0) }))}
+                          placeholder="200"
+                          title="Max number of movies to refresh per run (per language)."
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="tagline">Concurrency</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          value={String(ottParams.concurrency)}
+                          onChange={(e) => setOttParams((p) => ({ ...p, concurrency: Number(e.target.value || 0) }))}
+                          placeholder="3"
+                          title="Parallelism for TMDB requests."
+                        />
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        disabled={loading || ottState?.status === 'running'}
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          try {
+                            const r = await postJson(
+                              '/api/admin/ott-refresh/start',
+                              {
+                                scope: ottScope,
+                                lang: ottScope === 'language' ? ottLang : '',
+                                overrides: {
+                                  region: ottParams.region,
+                                  limit: ottParams.limit,
+                                  concurrency: ottParams.concurrency,
+                                  staleHours: ottParams.staleHours,
+                                  onlyStale: !!ottParams.onlyStale
+                                }
+                              },
+                              token
+                            );
+                            setOttState((r as any)?.ottRefresh || null);
+                            await loadStatus(token);
+                          } catch (e: any) {
+                            setError(e?.message || 'OTT refresh failed to start');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Start OTT refresh
+                      </button>
+
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        disabled={loading || ottState?.status !== 'running'}
+                        onClick={async () => {
+                          if (!token) return;
+                          setLoading(true);
+                          setError(null);
+                          try {
+                            await postJson('/api/admin/ott-refresh/cancel', {}, token);
+                            const r = await getJson('/api/admin/ott-refresh/status', token);
+                            setOttState((r as any)?.ottRefresh || null);
+                          } catch (e: any) {
+                            setError(e?.message || 'Cancel failed');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                      >
+                        Cancel
+                      </button>
+
+                      <span className="chip" title="OTT refresh status">
+                        Status: {ottState?.status ? String(ottState.status) : 'idle'}
+                      </span>
+                    </div>
+
+                    {ottState ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="meta">
+                          {ottState.startedAt ? <span className="chip">Started: {new Date(ottState.startedAt).toLocaleString()}</span> : null}
+                          {ottState.finishedAt ? <span className="chip">Finished: {new Date(ottState.finishedAt).toLocaleString()}</span> : null}
+                          {ottState.totals ? (
+                            <>
+                              <span className="chip">Attempted: {ottState.totals.attempted ?? 0}</span>
+                              <span className="chip">Wrote: {ottState.totals.wrote ?? 0}</span>
+                              <span className="chip">Errors: {ottState.totals.errors ?? 0}</span>
+                            </>
+                          ) : null}
+                        </div>
+                        {Array.isArray(ottState.results) && ottState.results.length ? (
+                          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+                            {ottState.results.slice(0, 12).map((x: any) => (
+                              <div key={String(x.lang)} className="chip" title="Per-language result">
+                                {x.lang}: attempted {x.attempted ?? 0}, wrote {x.wrote ?? 0}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

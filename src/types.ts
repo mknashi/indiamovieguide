@@ -63,6 +63,7 @@ export interface Movie {
   certification?: string;
   trailerUrl?: string;
   ott?: OttOffer[];
+  ottLastVerifiedAt?: string; // ISO time; derived from cached OTT offers
   songs?: Song[];
   ratings?: RatingSource[];
   reviews?: ReviewItem[];
