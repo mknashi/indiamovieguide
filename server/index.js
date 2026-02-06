@@ -619,7 +619,9 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 
   try {
     const row = db
-      .prepare('SELECT tmdb_id, trailer_url, title, release_date, status, synopsis, poster, backdrop, updated_at FROM movies WHERE id = ?')
+      .prepare(
+        'SELECT tmdb_id, trailer_url, title, language, release_date, status, synopsis, poster, backdrop, updated_at FROM movies WHERE id = ?'
+      )
       .get(movieId);
     const tmdbId = row?.tmdb_id;
     if (!tmdbId) return;
@@ -654,11 +656,16 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     const synopsis = String(row?.synopsis || '').trim();
     const missingSynopsis = synopsis.length < 12;
     const missingArtwork = !String(row?.poster || '').trim() && !String(row?.backdrop || '').trim();
-    // Only fetch songs in real-time if we have none locally.
-    // Admin can curate songs (including missing links) without being overwritten.
+    // Song refresh rules:
+    // - Always respect admin-curated songs (don't auto-overwrite).
+    // - If we have 0 songs OR have songs but none are playable (no YouTube links), we can attempt a refresh.
     const missingSongs = songCount === 0;
+    const missingPlayableSongs = playableSongCount === 0;
     const forceSongs = opts?.forceSongs === true;
     const forceFull = opts?.forceFull === true;
+    // Only auto-refresh songs on explicit movie page loads (to limit provider usage).
+    const autoSongs = opts?.autoSongs === true;
+    const needsSongsRefresh = autoSongs && (missingSongs || missingPlayableSongs) && adminSongCount === 0;
 
     const storedStatus = String(row?.status || '').trim();
     const inferredStatus = statusFrom(row?.release_date, offerCount > 0);
@@ -679,7 +686,16 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     ); // default 30 days
     const ttlMs = (isUpcoming ? UPCOMING_TTL_HOURS : DEFAULT_TTL_HOURS) * 60 * 60 * 1000;
 
-    if (debugSongs && (forceSongs || missingSongs)) {
+    const SONGS_AUTO_TTL_HOURS = Math.max(
+      1,
+      Math.min(24 * 14, Number(process.env.SONGS_AUTO_REFRESH_HOURS || 0) || 24)
+    ); // default 24h, max 14 days
+    const songsTtlMs = SONGS_AUTO_TTL_HOURS * 60 * 60 * 1000;
+    const songsAutoKey = `last_song_auto_refresh_at:${movieId}`;
+    const lastSongAutoAt = metaGetNumber(songsAutoKey);
+    const canAutoRefreshSongs = !lastSongAutoAt || Date.now() - lastSongAutoAt > songsTtlMs;
+
+    if (debugSongs && (forceSongs || needsSongsRefresh)) {
       slog('enrich start', {
         movieId,
         tmdbId,
@@ -687,162 +703,147 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         songCount,
         playableSongCount,
         adminSongCount,
-        forceSongs
+        forceSongs,
+        needsSongsRefresh,
+        canAutoRefreshSongs
       });
     }
 
-    const needsFull =
+    const needsFullNonSongs =
       missingTrailer ||
       offerCount === 0 ||
       ratingCount === 0 ||
       reviewCount === 0 ||
-      missingSongs ||
       missingCastImages ||
       missingCast ||
       (isUpcoming && (missingSynopsis || missingArtwork));
 
-    if (
-      !needsFull
-    )
-      return;
+    const needsFull = needsFullNonSongs || needsSongsRefresh || forceSongs;
+    if (!needsFull) return;
 
-    // Avoid hammering TMDB for sparse upcoming titles on every page load.
-    // If details are missing but we refreshed recently, wait for the TTL unless forced.
-    if (!forceFull && lastUpdatedMs && Date.now() - lastUpdatedMs < ttlMs) {
-      // Still allow song refresh if explicitly forced (admin) even inside TTL.
-      if (!(forceSongs && (missingSongs || opts?.overrideAdminSongs === true))) return;
-    }
+    // Extracted helper so we can refresh songs without a full TMDB fetch when appropriate.
+    const refreshSongsIfNeeded = async (full) => {
+      if (!(forceSongs || needsSongsRefresh)) return;
+      if (!forceSongs && !canAutoRefreshSongs) return;
 
-    const full = await tmdbGetMovieFull(tmdbId);
-    upsertMovieFromTmdb(db, full);
+      // Mark attempt up front so repeated page visits don't hammer providers.
+      if (!forceSongs) metaSet(songsAutoKey, String(Date.now()));
 
-    if (!full.trailerUrl) {
-      const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
-      const trailerUrl = yt[0]?.youtubeUrl || '';
-      if (trailerUrl) {
-        db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(
-          trailerUrl,
-          nowIso(),
+      const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
+      const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
+      if (debugSongs) slog('song refresh', { movieTitle: full.title, language: full.language, year, ytMode });
+      const ytQuotaUntil = metaGetNumber('youtube_quota_until');
+      const ytBlocked = ytQuotaUntil && Date.now() < ytQuotaUntil;
+
+      // Do not overwrite admin-curated songs unless explicitly allowed.
+      if (forceSongs && adminSongCount > 0 && opts?.overrideAdminSongs !== true) {
+        if (debugSongs) slog('skip refresh: admin songs exist', { adminSongCount });
+        return;
+      }
+      if (forceSongs) {
+        // If the user explicitly requests a refresh, clear cached songs first so we don't keep stale/wrong matches.
+        clearSongsForMovie(db, movieId);
+        // Clear any previously guessed/incorrect wiki attribution for this movie.
+        db.prepare("DELETE FROM attributions WHERE entity_type = 'movie' AND entity_id = ? AND provider = 'wikipedia'").run(
+          movieId
+        );
+        // Clear any previous catalog attribution for this movie.
+        db.prepare("DELETE FROM attributions WHERE entity_type = 'movie' AND entity_id = ? AND provider IN ('itunes','spotify')").run(
           movieId
         );
       }
-    }
 
-	    if (forceSongs || missingSongs) {
-	      const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
-	      const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
-	      if (debugSongs) slog('song refresh', { movieTitle: full.title, language: full.language, year, ytMode });
-	      const ytQuotaUntil = metaGetNumber('youtube_quota_until');
-	      const ytBlocked = ytQuotaUntil && Date.now() < ytQuotaUntil;
+      // Prefer Apple iTunes tracklists for definitive song names *only if* we can map
+      // enough tracks to playable links. Otherwise, keep a YouTube-first list for UX.
+      const itunes = await itunesFindSoundtrackForMovie({ title: full.title, year, language: full.language }).catch(() => null);
+      if (itunes?.tracks?.length) {
+        if (debugSongs) slog('itunes found', { tracks: itunes.tracks.length, albumUrl: !!itunes.albumUrl });
+        const trackTitles = itunes.tracks.map((t) => t.title).filter(Boolean);
+        const trackArtists = {};
+        for (const t of itunes.tracks) {
+          if (t?.title && t?.artist) trackArtists[t.title] = t.artist;
+        }
+        const trackMap = await youtubeMatchVideosForTracklist({
+          movieTitle: full.title,
+          language: full.language,
+          year,
+          tracks: trackTitles,
+          trackArtists,
+          mode: ytMode
+        }).catch(() => new Map());
 
-	      // Do not overwrite admin-curated songs unless explicitly allowed.
-	      if (forceSongs && adminSongCount > 0 && opts?.overrideAdminSongs !== true) {
-	        if (debugSongs) slog('skip refresh: admin songs exist', { adminSongCount });
-	        return;
-	      }
-	      if (forceSongs) {
-	        // If the user explicitly requests a refresh, clear cached songs first so we don't keep stale/wrong matches.
-	        clearSongsForMovie(db, movieId);
-	        // Clear any previously guessed/incorrect wiki attribution for this movie.
-	        db.prepare("DELETE FROM attributions WHERE entity_type = 'movie' AND entity_id = ? AND provider = 'wikipedia'").run(
-	          movieId
-	        );
-	        // Clear any previous catalog attribution for this movie.
-	        db.prepare("DELETE FROM attributions WHERE entity_type = 'movie' AND entity_id = ? AND provider IN ('itunes','spotify')").run(
-	          movieId
-	        );
-	      }
+        const songs = itunes.tracks.slice(0, 20).map((t) => ({
+          title: t.title,
+          singers: t.artist ? [t.artist] : [],
+          youtubeUrl: trackMap.get(t.title) || '',
+          sourceUrl: t.url || itunes.albumUrl || '',
+          sourceProviderId: t.providerId || ''
+        }));
 
-	      // Prefer Apple iTunes tracklists for definitive song names *only if* we can map
-	      // enough tracks to playable links. Otherwise, keep a YouTube-first list for UX.
-	      const itunes = await itunesFindSoundtrackForMovie({ title: full.title, year, language: full.language }).catch(() => null);
-	      if (itunes?.tracks?.length) {
-	        if (debugSongs) slog('itunes found', { tracks: itunes.tracks.length, albumUrl: !!itunes.albumUrl });
-	        const trackTitles = itunes.tracks.map((t) => t.title).filter(Boolean);
-	        const trackArtists = {};
-	        for (const t of itunes.tracks) {
-	          if (t?.title && t?.artist) trackArtists[t.title] = t.artist;
-	        }
-	        const trackMap = await youtubeMatchVideosForTracklist({
-	          movieTitle: full.title,
-	          language: full.language,
-	          year,
-	          tracks: trackTitles,
-	          trackArtists,
-	          mode: ytMode
-	        }).catch(() => new Map());
+        const linkedCount = songs.filter((s) => !!s.youtubeUrl).length;
+        // If we can't get enough playable links, fall back to a YouTube-first list.
+        const minLinked = Math.max(3, Math.ceil(songs.length * 0.7));
+        if (debugSongs) slog('itunes youtube mapping', { linkedCount, total: songs.length, minLinked });
+        if (linkedCount >= minLinked) {
+          replaceSongsForMovie(db, movieId, songs, {
+            source: 'itunes',
+            platform: 'YouTube',
+            sourceUrl: itunes.albumUrl || '',
+            attributionProvider: 'itunes'
+          });
 
-	        const songs = itunes.tracks.slice(0, 20).map((t) => ({
-	          title: t.title,
-	          singers: t.artist ? [t.artist] : [],
-	          youtubeUrl: trackMap.get(t.title) || '',
-	          sourceUrl: t.url || itunes.albumUrl || '',
-	          sourceProviderId: t.providerId || ''
-	        }));
+          if (itunes.albumUrl) {
+            db.prepare(
+              'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).run(
+              hashId('attr', `${movieId}:itunes`),
+              'movie',
+              movieId,
+              'itunes',
+              String(itunes.albumId || ''),
+              itunes.albumUrl,
+              nowIso()
+            );
+          }
 
-	        const linkedCount = songs.filter((s) => !!s.youtubeUrl).length;
-	        // If we can't get enough playable links, fall back to a YouTube-first list.
-	        const minLinked = Math.max(3, Math.ceil(songs.length * 0.7));
-	        if (debugSongs) slog('itunes youtube mapping', { linkedCount, total: songs.length, minLinked });
-	        if (linkedCount >= minLinked) {
-	          replaceSongsForMovie(db, movieId, songs, {
-	            source: 'itunes',
-	            platform: 'YouTube',
-	            sourceUrl: itunes.albumUrl || '',
-	            attributionProvider: 'itunes'
-	          });
+          // Tracklist + playable links found; stop here.
+          if (debugSongs) slog('itunes committed', { movieId });
+          return;
+        }
 
-	          if (itunes.albumUrl) {
-	            db.prepare(
-	              'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-	            ).run(
-	              hashId('attr', `${movieId}:itunes`),
-	              'movie',
-	              movieId,
-	              'itunes',
-	              String(itunes.albumId || ''),
-	              itunes.albumUrl,
-	              nowIso()
-	            );
-	          }
+        // If YouTube is currently blocked due to quota, still store the definitive tracklist
+        // without links so the UI can show song names (and offer a manual YouTube search per song).
+        if (ytBlocked) {
+          replaceSongsForMovie(db, movieId, songs, {
+            source: 'itunes',
+            platform: 'YouTube',
+            sourceUrl: itunes.albumUrl || '',
+            attributionProvider: 'itunes'
+          });
 
-	          // Tracklist + playable links found; stop here.
-	          if (debugSongs) slog('itunes committed', { movieId });
-	          return;
-	        }
+          if (itunes.albumUrl) {
+            db.prepare(
+              'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).run(
+              hashId('attr', `${movieId}:itunes`),
+              'movie',
+              movieId,
+              'itunes',
+              String(itunes.albumId || ''),
+              itunes.albumUrl,
+              nowIso()
+            );
+          }
 
-	        // If YouTube is currently blocked due to quota, still store the definitive tracklist
-	        // without links so the UI can show song names (and offer a manual YouTube search per song).
-	        if (ytBlocked) {
-	          replaceSongsForMovie(db, movieId, songs, {
-	            source: 'itunes',
-	            platform: 'YouTube',
-	            sourceUrl: itunes.albumUrl || '',
-	            attributionProvider: 'itunes'
-	          });
+          if (debugSongs) slog('itunes committed (no youtube links; quota blocked)', { movieId });
+          return;
+        }
+      }
 
-	          if (itunes.albumUrl) {
-	            db.prepare(
-	              'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-	            ).run(
-	              hashId('attr', `${movieId}:itunes`),
-	              'movie',
-	              movieId,
-	              'itunes',
-	              String(itunes.albumId || ''),
-	              itunes.albumUrl,
-	              nowIso()
-	            );
-	          }
-
-	          if (debugSongs) slog('itunes committed (no youtube links; quota blocked)', { movieId });
-	          return;
-	        }
-	      }
-	      const wikiOverride = opts?.wikiTitleOverride ? String(opts.wikiTitleOverride).trim() : '';
-	      const wikiFromOverride = wikiOverride
-	        ? await wikipediaSoundtrackTracksByTitle(wikiOverride, { lang: 'en' }).catch(() => null)
-	        : null;
+      const wikiOverride = opts?.wikiTitleOverride ? String(opts.wikiTitleOverride).trim() : '';
+      const wikiFromOverride = wikiOverride
+        ? await wikipediaSoundtrackTracksByTitle(wikiOverride, { lang: 'en' }).catch(() => null)
+        : null;
 
       const wiki =
         wikiFromOverride && wikiFromOverride?.tracks?.length
@@ -925,7 +926,6 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
           if (debugSongs) slog('fallback to youtubeSearchSongsForMovie', { count: ytSongs.length });
           if (ytSongs.length) replaceSongsFromYoutube(db, movieId, ytSongs);
         }
-
       } else {
         // If the caller explicitly requested a Wikipedia title, do not fall back to noisy YouTube-only results.
         if (wikiOverride) return;
@@ -939,7 +939,77 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         if (debugSongs) slog('youtubeSearchSongsForMovie', { count: songs.length });
         if (songs.length) replaceSongsFromYoutube(db, movieId, songs);
       }
+    };
+
+    // Avoid hammering TMDB for sparse upcoming titles on every page load.
+    // If details are missing but we refreshed recently, wait for the TTL unless forced.
+    if (!needsFullNonSongs) {
+      // Songs-only refresh path: do not call TMDB if everything else is already present.
+      const castNames = db
+        .prepare(
+          `
+          SELECT p.name as name
+          FROM movie_cast mc
+          JOIN persons p ON p.id = mc.person_id
+          WHERE mc.movie_id = ?
+          ORDER BY mc.billing_order ASC
+          LIMIT 8
+        `
+        )
+        .all(movieId)
+        .map((x) => x?.name)
+        .filter(Boolean);
+      const pseudoFull = {
+        title: row?.title || '',
+        language: row?.language || '',
+        releaseDate: row?.release_date || '',
+        cast: castNames.map((n) => ({ name: n }))
+      };
+      await refreshSongsIfNeeded(pseudoFull);
+      return;
     }
+
+    if (!forceFull && lastUpdatedMs && Date.now() - lastUpdatedMs < ttlMs) {
+      // Still allow song refresh (auto/forced) even inside the details TTL.
+      const castNames = db
+        .prepare(
+          `
+          SELECT p.name as name
+          FROM movie_cast mc
+          JOIN persons p ON p.id = mc.person_id
+          WHERE mc.movie_id = ?
+          ORDER BY mc.billing_order ASC
+          LIMIT 8
+        `
+        )
+        .all(movieId)
+        .map((x) => x?.name)
+        .filter(Boolean);
+      await refreshSongsIfNeeded({
+        title: row?.title || '',
+        language: row?.language || '',
+        releaseDate: row?.release_date || '',
+        cast: castNames.map((n) => ({ name: n }))
+      });
+      return;
+    }
+
+    const full = await tmdbGetMovieFull(tmdbId);
+    upsertMovieFromTmdb(db, full);
+
+    if (!full.trailerUrl) {
+      const yt = await youtubeSearchCached(db, `${full.title} official trailer`).catch(() => []);
+      const trailerUrl = yt[0]?.youtubeUrl || '';
+      if (trailerUrl) {
+        db.prepare('UPDATE movies SET trailer_url = ?, updated_at = ? WHERE id = ?').run(
+          trailerUrl,
+          nowIso(),
+          movieId
+        );
+      }
+    }
+
+    await refreshSongsIfNeeded(full);
 
     // Ratings from OMDb (optional; needs OMDB_API_KEY).
     try {
@@ -3610,7 +3680,7 @@ app.get('/api/movies/:id', async (req, res) => {
       try {
         const full = await tmdbGetMovieFull(tmdbId);
         movieId = upsertMovieFromTmdb(db, full);
-        await enrichMovieIfNeeded(movieId, { debug });
+        await enrichMovieIfNeeded(movieId, { debug, autoSongs: true });
         movie = hydrateMovie(db, movieId);
       } catch {
         // ignore
@@ -3627,7 +3697,7 @@ app.get('/api/movies/:id', async (req, res) => {
     movie = hydrateMovie(db, movieId);
   } else {
     // On normal movie page loads, opportunistically fill any missing OTT/songs/trailer/cast/rating.
-    await enrichMovieIfNeeded(movieId, { debug });
+    await enrichMovieIfNeeded(movieId, { debug, autoSongs: true });
     movie = hydrateMovie(db, movieId);
   }
 
