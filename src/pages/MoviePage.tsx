@@ -380,11 +380,16 @@ export function MoviePage({ id }: { id: string }) {
               </div>
             </div>
 
-            <aside className="movie-side">
-              <div className="detail movie-section">
-                <h4>Where to watch</h4>
-                <div className="meta" style={{ marginTop: 10 }}>
-                  {(movie.ott || []).length ? (
+	            <aside className="movie-side">
+	              <div className="detail movie-section">
+	                <h4>Where to watch</h4>
+	                {movie.ottLastVerifiedAt ? (
+	                  <div className="tagline" style={{ marginTop: 6 }}>
+	                    Last verified: {new Date(movie.ottLastVerifiedAt).toLocaleString()}
+	                  </div>
+	                ) : null}
+	                <div className="meta" style={{ marginTop: 10 }}>
+	                  {(movie.ott || []).length ? (
                     (movie.ott || []).slice(0, 12).map((o) => {
                       const p = String(o.provider || '').toLowerCase();
                       const title = encodeURIComponent(movie.title);

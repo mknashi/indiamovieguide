@@ -485,6 +485,8 @@ export function hydrateMovie(db, movieId) {
       logo: o.logo || undefined,
       region: o.region || undefined
     }));
+  const ottLastVerifiedAt =
+    db.prepare('SELECT MAX(created_at) as t FROM ott_offers WHERE movie_id = ?').get(movieId)?.t || undefined;
 
   const ratings = db
     .prepare('SELECT * FROM ratings WHERE movie_id = ? ORDER BY source ASC')
@@ -541,6 +543,7 @@ export function hydrateMovie(db, movieId) {
     certification: undefined,
     trailerUrl: m.trailer_url || undefined,
     ott,
+    ottLastVerifiedAt: ottLastVerifiedAt || undefined,
     songs,
     ratings,
     reviews,

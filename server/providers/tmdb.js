@@ -192,6 +192,35 @@ export async function tmdbGetMovieFull(tmdbId) {
   };
 }
 
+export async function tmdbGetMovieOffers(tmdbId, { region } = {}) {
+  const details = await tmdbFetch(`/movie/${tmdbId}/watch/providers`, {});
+
+  const preferredRegion = String(region || process.env.OTT_REGION || 'IN').toUpperCase();
+  const providerResults = details?.results || {};
+  const providers =
+    providerResults[preferredRegion] || providerResults.IN || providerResults.US || providerResults.GB || null;
+
+  const providerLink = providers?.link || '';
+  const offers = [];
+  for (const type of ['flatrate', 'rent', 'buy']) {
+    for (const p of providers?.[type] || []) {
+      offers.push({
+        provider: p.provider_name,
+        type: type === 'flatrate' ? 'Streaming' : type === 'rent' ? 'Rent' : 'Buy',
+        url: providerLink || '',
+        logo: tmdbImageUrl(p.logo_path, 'w500'),
+        region: providers ? preferredRegion : undefined
+      });
+    }
+  }
+
+  return {
+    region: providers ? preferredRegion : null,
+    link: providerLink || '',
+    offers
+  };
+}
+
 export function defaultIndianLanguageCodes() {
   // Keep in sync with the UI header's "popular languages".
   return ['hi', 'kn', 'te', 'ta', 'ml', 'mr', 'bn'];

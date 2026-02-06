@@ -88,6 +88,10 @@ export default function App() {
 	              className={`icon-button ${route.name === 'streaming' ? 'active' : ''}`}
 	              type="button"
 	              onClick={() => {
+	                if (route.name === 'streaming') {
+	                  navigate('/');
+	                  return;
+	                }
 	                const q = activeLang && activeLang !== 'All' ? `?lang=${encodeURIComponent(activeLang)}` : '';
 	                navigate(`/streaming${q}`);
 	              }}

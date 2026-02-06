@@ -3,7 +3,7 @@ import { Movie } from '../types';
 import { navigate } from '../router';
 import { MovieCard } from '../components/MovieCard';
 
-type ProviderFacet = { provider: string; count: number };
+type ProviderFacet = { provider: string; count: number; logo?: string; lastVerifiedAt?: string };
 type StreamingResponse = {
   generatedAt: string;
   filters: {
@@ -13,6 +13,7 @@ type StreamingResponse = {
     region: string | null;
   };
   providers: ProviderFacet[];
+  lastVerifiedAt?: string | null;
   movies: Movie[];
   page: number;
   pageSize: number;
@@ -75,6 +76,9 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
 
   const providers = payload?.providers || [];
   const movies = payload?.movies || [];
+  const lastVerifiedText = payload?.lastVerifiedAt
+    ? new Date(String(payload.lastVerifiedAt)).toLocaleString()
+    : 'Unknown';
 
   return (
     <div>
@@ -107,6 +111,7 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
               key={p.provider}
               className={`chip ${activeProvider === p.provider ? 'chip-active' : ''}`}
               type="button"
+              style={{ display: 'inline-flex', alignItems: 'center' }}
               onClick={() => {
                 setActiveProvider(p.provider);
                 setPage(1);
@@ -115,15 +120,27 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
                 qs.set('provider', p.provider);
                 navigate(`/streaming?${qs.toString()}`);
               }}
-              title={`${p.count} titles`}
+              title={p.lastVerifiedAt ? `Last verified: ${new Date(p.lastVerifiedAt).toLocaleString()}` : p.provider}
             >
-              {p.provider} <span style={{ opacity: 0.7 }}>({p.count})</span>
+              {p.logo ? (
+                <img
+                  src={p.logo}
+                  alt=""
+                  style={{ width: 18, height: 18, borderRadius: 6, marginRight: 8, verticalAlign: 'middle' }}
+                  loading="lazy"
+                />
+              ) : null}
+              {p.provider}
             </button>
           ))}
         </div>
 
         <div className="tagline" style={{ marginTop: 10 }}>
-          Tip: click a movie to see “Where to watch” and song links. Availability can change; we’ll keep refreshing in the background.
+          Region: <strong>{payload?.filters?.region || 'IN'}</strong> · Last verified: <strong>{lastVerifiedText}</strong>
+          <span style={{ opacity: 0.75 }}>
+            {' '}
+            (cached availability can change; open movie details to refresh in the background)
+          </span>
         </div>
       </div>
 
@@ -185,4 +202,3 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
     </div>
   );
 }
-
