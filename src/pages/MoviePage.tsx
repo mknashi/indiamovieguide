@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowLeftLine, RiChat3Line, RiExternalLinkLine, RiHeart3Line, RiListCheck2, RiPlayLine, RiStarLine } from 'react-icons/ri';
 import { Movie } from '../types';
 import { navigate } from '../router';
@@ -20,6 +20,8 @@ export function MoviePage({ id }: { id: string }) {
   const [lists, setLists] = useState<{ favorite: boolean; watchlist: boolean } | null>(null);
   const [captchaToken, setCaptchaToken] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [songsRefreshing, setSongsRefreshing] = useState(false);
+  const songPollToken = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -42,6 +44,50 @@ export function MoviePage({ id }: { id: string }) {
       alive = false;
     };
   }, [id]);
+
+  // Lazy-load songs: movie details should render quickly, while songs/links refresh in the background.
+  // We poll a few times so the UI updates without the user needing a manual refresh.
+  useEffect(() => {
+    if (!movie) return;
+    const songs = movie.songs || [];
+    const need = songs.length === 0 || songs.every((s) => !s.youtubeUrl);
+    if (!need) {
+      setSongsRefreshing(false);
+      return;
+    }
+
+    const token = ++songPollToken.current;
+    setSongsRefreshing(true);
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      for (let i = 0; i < 6; i++) {
+        await sleep(i === 0 ? 800 : 1500);
+        if (songPollToken.current !== token) return;
+        try {
+          const res = await fetch(`/api/movies/${encodeURIComponent(id)}`, { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = (await res.json()) as Movie;
+          if (songPollToken.current !== token) return;
+          setMovie(data);
+          const s = data.songs || [];
+          const still = s.length === 0 || s.every((x) => !x.youtubeUrl);
+          if (!still) {
+            setSongsRefreshing(false);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (songPollToken.current === token) setSongsRefreshing(false);
+    })();
+
+    return () => {
+      // Invalidate outstanding polls when navigating away.
+      if (songPollToken.current === token) songPollToken.current++;
+    };
+  }, [id, movie?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -271,6 +317,16 @@ export function MoviePage({ id }: { id: string }) {
               <div className="detail movie-section">
                 <div className="meta" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
                   <h4 style={{ margin: 0 }}>Songs</h4>
+                  {songsRefreshing ? (
+                    <span
+                      className="chip"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 10 }}
+                      title="Fetching songs/links in the background"
+                    >
+                      <span className="spinner" />
+                      Refreshing…
+                    </span>
+                  ) : null}
                   <button
                     className="ghost-button"
                     type="button"

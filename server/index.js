@@ -1024,6 +1024,25 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
   }
 }
 
+// Fire-and-forget enrichment queue to keep page loads fast.
+// Prevents stampeding provider calls when multiple clients hit the same title at once.
+const movieEnrichInFlight = new Map(); // movieId -> Promise<void>
+function enqueueMovieEnrich(movieId, opts) {
+  const id = String(movieId || '').trim();
+  if (!id) return;
+  if (movieEnrichInFlight.has(id)) return;
+  const p = (async () => {
+    try {
+      await enrichMovieIfNeeded(id, opts);
+    } catch {
+      // ignore
+    } finally {
+      movieEnrichInFlight.delete(id);
+    }
+  })();
+  movieEnrichInFlight.set(id, p);
+}
+
 function normalizeText(s) {
   return String(s || '')
     .toLowerCase()
@@ -3697,7 +3716,8 @@ app.get('/api/movies/:id', async (req, res) => {
     movie = hydrateMovie(db, movieId);
   } else {
     // On normal movie page loads, opportunistically fill any missing OTT/songs/trailer/cast/rating.
-    await enrichMovieIfNeeded(movieId, { debug, autoSongs: true });
+    // Do not block the response on provider calls; enrich in the background and return the cached DB payload.
+    enqueueMovieEnrich(movieId, { debug, autoSongs: true });
     movie = hydrateMovie(db, movieId);
   }
 

@@ -43,6 +43,22 @@ a {
   text-decoration: none;
 }
 
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: var(--brand-gold);
+  animation: img-spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes img-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-shell {
   max-width: 1200px;
   margin: 0 auto;
