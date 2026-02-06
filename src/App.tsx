@@ -43,6 +43,17 @@ export default function App() {
   const [me, setMe] = useState<any>(null);
 
   useEffect(() => {
+    // Preserve the user's last "listing" context (home/search/streaming/etc) so the Movie back button can return there.
+    // This avoids losing context when navigating from /streaming -> /movie/:id.
+    if (route.name === 'movie' || route.name === 'person' || route.name === 'trailer' || route.name === 'song') return;
+    try {
+      sessionStorage.setItem('img_last_list_path', window.location.pathname + window.location.search);
+    } catch {
+      // ignore
+    }
+  }, [route.name]);
+
+  useEffect(() => {
     let alive = true;
     const refresh = async () => {
       try {

@@ -26,6 +26,19 @@ function normalizeProvider(p?: string) {
   return String(p || '').trim();
 }
 
+const POPULAR_PROVIDERS = [
+  'Netflix',
+  'Prime Video',
+  'Amazon Prime Video',
+  'Disney+ Hotstar',
+  'Hotstar',
+  'JioCinema',
+  'ZEE5',
+  'SonyLIV',
+  'Sun NXT',
+  'aha'
+];
+
 export function StreamingPage({ lang, provider }: { lang?: string; provider?: string }) {
   const [activeProvider, setActiveProvider] = useState<string>(() => normalizeProvider(provider));
   const [page, setPage] = useState(1);
@@ -75,7 +88,22 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  const providers = payload?.providers || [];
+  const providersRaw = payload?.providers || [];
+  const providers = useMemo(() => {
+    const rank = new Map(POPULAR_PROVIDERS.map((p, i) => [p.toLowerCase(), i]));
+    return providersRaw
+      .slice()
+      .sort((a, b) => {
+        const ra = rank.has(String(a.provider || '').toLowerCase()) ? rank.get(String(a.provider || '').toLowerCase())! : 999;
+        const rb = rank.has(String(b.provider || '').toLowerCase()) ? rank.get(String(b.provider || '').toLowerCase())! : 999;
+        if (ra !== rb) return ra - rb;
+        // Fall back to count desc so the list remains useful if new providers appear.
+        const ca = Number(a.count || 0) || 0;
+        const cb = Number(b.count || 0) || 0;
+        if (ca !== cb) return cb - ca;
+        return String(a.provider || '').localeCompare(String(b.provider || ''));
+      });
+  }, [providersRaw]);
   const movies = payload?.movies || [];
   const lastVerifiedText = payload?.lastVerifiedAt
     ? new Date(String(payload.lastVerifiedAt)).toLocaleString()

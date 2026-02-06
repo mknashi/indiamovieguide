@@ -138,7 +138,22 @@ export function MoviePage({ id }: { id: string }) {
   return (
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
-        <button className="ghost-button" type="button" onClick={() => navigate('/')}>
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={() => {
+            try {
+              const last = sessionStorage.getItem('img_last_list_path') || '';
+              if (last) {
+                navigate(last);
+                return;
+              }
+            } catch {
+              // ignore
+            }
+            navigate('/');
+          }}
+        >
           <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiArrowLeftLine  /></span>
           Back
         </button>
@@ -408,7 +423,8 @@ export function MoviePage({ id }: { id: string }) {
                                     ? `https://www.jiocinema.com/search/${title}`
                                     : '';
 
-                      const out = o.deepLink || direct || o.url || '';
+                      // Prefer TMDB/JustWatch movie pages over provider search links (more accurate).
+                      const out = o.deepLink || o.url || direct || '';
                       return (
                         <a
                           key={`${o.provider}-${o.type}`}
@@ -417,7 +433,7 @@ export function MoviePage({ id }: { id: string }) {
                           target={out ? '_blank' : undefined}
                           rel={out ? 'noreferrer' : undefined}
                           style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                          title={out ? 'Open provider' : 'No link available'}
+                          title={out ? 'Open watch page' : 'No link available'}
                         >
                           {o.logo ? (
                             <img
