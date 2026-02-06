@@ -8,3 +8,4 @@ dist
 env
 *.swp
 public/data
+tsconfig.tsbuildinfo

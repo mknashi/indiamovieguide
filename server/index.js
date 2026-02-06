@@ -3986,6 +3986,75 @@ app.get('/api/browse', async (req, res) => {
   });
 });
 
+// "Streaming now" browse: reads from local DB (ott_offers) and does not block on provider calls.
+// Accuracy depends on how recently offers were refreshed for each movie.
+app.get('/api/streaming', (req, res) => {
+  const provider = String(req.query.provider || '').trim();
+  const lang = String(req.query.lang || '').trim();
+  const genre = String(req.query.genre || '').trim();
+  const region = String(req.query.region || '').trim() || 'IN';
+  const page = Math.max(1, Math.trunc(Number(req.query.page || 1) || 1));
+  const pageSize = Math.max(6, Math.min(48, Math.trunc(Number(req.query.pageSize || 24) || 24)));
+  const offset = (page - 1) * pageSize;
+
+  const where = `
+    FROM ott_offers o
+    JOIN movies m ON m.id = o.movie_id
+    LEFT JOIN movie_genres mg ON mg.movie_id = m.id
+    WHERE o.offer_type = 'Streaming'
+      AND COALESCE(m.is_indian, 1) = 1
+      AND (? = '' OR lower(o.provider) = lower(?))
+      AND (? = '' OR lower(m.language) = lower(?))
+      AND (? = '' OR lower(mg.genre) = lower(?))
+      AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
+  `;
+  const args = [provider, provider, lang, lang, genre, genre, region, region];
+
+  const totalRow = db.prepare(`SELECT COUNT(DISTINCT m.id) as c ${where}`).get(...args);
+  const total = Number(totalRow?.c || 0) || 0;
+
+  const ids = db
+    .prepare(
+      `
+      SELECT DISTINCT m.id as id
+      ${where}
+      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
+      LIMIT ? OFFSET ?
+    `
+    )
+    .all(...args, pageSize, offset)
+    .map((r) => r.id);
+
+  const providers = db
+    .prepare(
+      `
+      SELECT o.provider as provider, COUNT(DISTINCT m.id) as c
+      FROM ott_offers o
+      JOIN movies m ON m.id = o.movie_id
+      WHERE o.offer_type = 'Streaming'
+        AND COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(m.language) = lower(?))
+        AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
+      GROUP BY o.provider
+      ORDER BY c DESC, o.provider ASC
+      LIMIT 30
+    `
+    )
+    .all(lang, lang, region, region)
+    .map((r) => ({ provider: r.provider, count: Number(r.c || 0) || 0 }));
+
+  res.json({
+    generatedAt: nowIso(),
+    filters: { provider: provider || null, lang: lang || null, genre: genre || null, region: region || null },
+    providers,
+    movies: ids.map((id) => hydrateMovie(db, id)).filter(Boolean),
+    page,
+    pageSize,
+    total,
+    hasMore: offset + ids.length < total
+  });
+});
+
 // Serve the current cached catalog if you want a static snapshot (optional).
 app.get('/api/catalog.json', (_req, res) => {
   const ids = db
