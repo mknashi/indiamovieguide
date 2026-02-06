@@ -691,9 +691,17 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       Math.min(24 * 14, Number(process.env.SONGS_AUTO_REFRESH_HOURS || 0) || 24)
     ); // default 24h, max 14 days
     const songsTtlMs = SONGS_AUTO_TTL_HOURS * 60 * 60 * 1000;
-    const songsAutoKey = `last_song_auto_refresh_at:${movieId}`;
-    const lastSongAutoAt = metaGetNumber(songsAutoKey);
-    const canAutoRefreshSongs = !lastSongAutoAt || Date.now() - lastSongAutoAt > songsTtlMs;
+    const SONGS_AUTO_ATTEMPT_MINUTES = Math.max(
+      2,
+      Math.min(60, Number(process.env.SONGS_AUTO_ATTEMPT_MINUTES || 0) || 10)
+    ); // default 10 min, max 60 min
+    const songsAttemptMs = SONGS_AUTO_ATTEMPT_MINUTES * 60 * 1000;
+    const songsAttemptKey = `last_song_auto_attempt_at:${movieId}`;
+    const songsSuccessKey = `last_song_auto_success_at:${movieId}`;
+    const lastSongAttemptAt = metaGetNumber(songsAttemptKey);
+    const lastSongSuccessAt = metaGetNumber(songsSuccessKey);
+    const canAttemptSongs = !lastSongAttemptAt || Date.now() - lastSongAttemptAt > songsAttemptMs;
+    const canAutoRefreshSongs = !lastSongSuccessAt || Date.now() - lastSongSuccessAt > songsTtlMs;
 
     if (debugSongs && (forceSongs || needsSongsRefresh)) {
       slog('enrich start', {
@@ -705,7 +713,8 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         adminSongCount,
         forceSongs,
         needsSongsRefresh,
-        canAutoRefreshSongs
+        canAutoRefreshSongs,
+        canAttemptSongs
       });
     }
 
@@ -724,10 +733,12 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     // Extracted helper so we can refresh songs without a full TMDB fetch when appropriate.
     const refreshSongsIfNeeded = async (full) => {
       if (!(forceSongs || needsSongsRefresh)) return;
-      if (!forceSongs && !canAutoRefreshSongs) return;
+      if (!forceSongs && (!canAutoRefreshSongs || !canAttemptSongs)) return;
 
       // Mark attempt up front so repeated page visits don't hammer providers.
-      if (!forceSongs) metaSet(songsAutoKey, String(Date.now()));
+      if (!forceSongs) metaSet(songsAttemptKey, String(Date.now()));
+      const beforeSongCount = songCount;
+      const beforePlayableCount = playableSongCount;
 
       const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
       const ytMode = tokenize(full.title).length <= 1 ? 'strict' : 'bestEffort';
@@ -808,6 +819,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 
           // Tracklist + playable links found; stop here.
           if (debugSongs) slog('itunes committed', { movieId });
+          if (!forceSongs) metaSet(songsSuccessKey, String(Date.now()));
           return;
         }
 
@@ -836,6 +848,8 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
           }
 
           if (debugSongs) slog('itunes committed (no youtube links; quota blocked)', { movieId });
+          // This is a partial success (tracklist only). Still mark success to avoid tight loops.
+          if (!forceSongs) metaSet(songsSuccessKey, String(Date.now()));
           return;
         }
       }
@@ -903,6 +917,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
             ).run(hashId('attr', `${movieId}:wikipedia`), 'movie', movieId, 'wikipedia', wiki.title || '', wiki.url, nowIso());
           }
           if (debugSongs) slog('wikipedia committed', { movieId });
+          if (!forceSongs) metaSet(songsSuccessKey, String(Date.now()));
         } else {
           if (ytBlocked) {
             // Quota is blocked; still store the soundtrack list without links so users see something useful.
@@ -913,6 +928,8 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
               ).run(hashId('attr', `${movieId}:wikipedia`), 'movie', movieId, 'wikipedia', wiki.title || '', wiki.url, nowIso());
             }
             if (debugSongs) slog('wikipedia committed (no youtube links; quota blocked)', { movieId });
+            // Partial success (tracklist only).
+            if (!forceSongs) metaSet(songsSuccessKey, String(Date.now()));
             return;
           }
 
@@ -938,6 +955,20 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         }).catch(() => []);
         if (debugSongs) slog('youtubeSearchSongsForMovie', { count: songs.length });
         if (songs.length) replaceSongsFromYoutube(db, movieId, songs);
+      }
+
+      // If something actually improved, mark success; otherwise let it retry later.
+      try {
+        const afterSongCount = db.prepare('SELECT COUNT(*) as c FROM songs WHERE movie_id = ?').get(movieId)?.c || 0;
+        const afterPlayableCount =
+          db
+            .prepare("SELECT COUNT(*) as c FROM songs WHERE movie_id = ? AND COALESCE(youtube_url, '') != ''")
+            .get(movieId)?.c || 0;
+        const improved =
+          afterSongCount > beforeSongCount || afterPlayableCount > beforePlayableCount || (beforeSongCount === 0 && afterSongCount > 0);
+        if (improved && !forceSongs) metaSet(songsSuccessKey, String(Date.now()));
+      } catch {
+        // ignore
       }
     };
 

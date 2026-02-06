@@ -61,8 +61,8 @@ export function MoviePage({ id }: { id: string }) {
 
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     (async () => {
-      for (let i = 0; i < 6; i++) {
-        await sleep(i === 0 ? 800 : 1500);
+      for (let i = 0; i < 12; i++) {
+        await sleep(i === 0 ? 900 : 1600);
         if (songPollToken.current !== token) return;
         try {
           const res = await fetch(`/api/movies/${encodeURIComponent(id)}`, { cache: 'no-store' });
