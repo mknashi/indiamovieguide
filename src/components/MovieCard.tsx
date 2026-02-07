@@ -168,8 +168,8 @@ export function MovieCard({ movie, contextProvider }: { movie: Movie; contextPro
           <div className="meta card-row-chips">
             {offers.length ? (
               offers.slice(0, 3).map((o) => {
-                // Prefer TMDB/JustWatch movie pages over provider search links (more accurate).
-                const out = o.deepLink || o.url || directUrlForOffer(o.provider) || '';
+                // Prefer direct/provider links for better UX; fall back to TMDB/JustWatch only if needed.
+                const out = o.deepLink || directUrlForOffer(o.provider) || o.url || '';
                 return (
                   <a
                     key={`${o.provider}-${o.type}`}

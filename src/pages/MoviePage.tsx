@@ -423,8 +423,8 @@ export function MoviePage({ id }: { id: string }) {
                                     ? `https://www.jiocinema.com/search/${title}`
                                     : '';
 
-                      // Prefer TMDB/JustWatch movie pages over provider search links (more accurate).
-                      const out = o.deepLink || o.url || direct || '';
+                      // Prefer direct/provider links for better UX; fall back to TMDB/JustWatch only if needed.
+                      const out = o.deepLink || direct || o.url || '';
                       return (
                         <a
                           key={`${o.provider}-${o.type}`}
