@@ -58,6 +58,19 @@ type AdminMovieEditorPayload = {
     character?: string;
     billingOrder?: number | null;
   }[];
+  ottOffers?: {
+    id: string;
+    provider: string;
+    offerType: string;
+    region?: string;
+    url?: string;
+    logo?: string;
+    source?: string;
+    deepLink?: string;
+    deepLinkSource?: string;
+    deepLinkVerifiedAt?: string | null;
+    createdAt?: string;
+  }[];
 };
 
 type ModerationQueue = {
@@ -170,6 +183,7 @@ export function AdminPanel({
     Record<string, { title: string; singers: string; youtubeUrl: string; platform: string }>
   >({});
   const [newSong, setNewSong] = useState({ title: '', singers: '', youtubeUrl: '', platform: 'YouTube' });
+  const [ottDrafts, setOttDrafts] = useState<Record<string, { deepLink: string }>>({});
   const [personQuery, setPersonQuery] = useState('');
   const [personResults, setPersonResults] = useState<any[]>([]);
   const [castAdd, setCastAdd] = useState({ personId: '', character: '', billingOrder: '' });
@@ -217,6 +231,12 @@ export function AdminPanel({
         };
       }
       setCastDrafts(cd);
+
+      const od: Record<string, { deepLink: string }> = {};
+      for (const o of (((data as any).ottOffers || []) as any[])) {
+        od[String(o.id)] = { deepLink: String(o.deepLink || '') };
+      }
+      setOttDrafts(od);
     } catch (e: any) {
       setError(e?.message || 'Failed to load movie editor');
     } finally {
@@ -257,6 +277,35 @@ export function AdminPanel({
   useEffect(() => {
     setBackfillState(status?.backfill || null);
   }, [status?.backfill]);
+
+  const orderedOttOffers = useMemo(() => {
+    const offers = (editor?.ottOffers || []) as any[];
+    if (!offers.length) return [];
+    const priority = [
+      'Netflix',
+      'Amazon Prime Video',
+      'Prime Video',
+      'Disney+ Hotstar',
+      'Hotstar',
+      'SonyLIV',
+      'ZEE5',
+      'JioCinema',
+      'Sun NXT',
+      'aha',
+      'MX Player'
+    ].map((s) => s.toLowerCase());
+    const score = (p: string) => {
+      const i = priority.indexOf(String(p || '').toLowerCase());
+      return i === -1 ? 999 : i;
+    };
+    return [...offers].sort((a, b) => {
+      const sa = score(a.provider);
+      const sb = score(b.provider);
+      if (sa !== sb) return sa - sb;
+      if (String(a.offerType) !== String(b.offerType)) return String(a.offerType).localeCompare(String(b.offerType));
+      return String(a.provider).localeCompare(String(b.provider));
+    });
+  }, [editor?.ottOffers]);
 
   useEffect(() => {
     if (!token) return;
@@ -1349,6 +1398,134 @@ export function AdminPanel({
                           </button>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="detail" style={{ marginTop: 14 }}>
+                      <h4 style={{ marginTop: 0 }}>OTT offers (deep links)</h4>
+                      {orderedOttOffers.length ? (
+                        <div className="song-list" style={{ marginTop: 10 }}>
+                          {orderedOttOffers.slice(0, 120).map((o: any) => {
+                            const d = ottDrafts[String(o.id)] || { deepLink: String(o.deepLink || '') };
+                            const isStreaming = String(o.offerType || '').toLowerCase() === 'streaming';
+                            const readonly = !isStreaming;
+                            return (
+                              <div key={o.id} className="song" style={{ alignItems: 'flex-start', gap: 12 }}>
+                                <div style={{ flex: 1, minWidth: 220 }}>
+                                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    {o.logo ? (
+                                      <img
+                                        src={o.logo}
+                                        alt=""
+                                        style={{
+                                          width: 28,
+                                          height: 28,
+                                          borderRadius: 8,
+                                          objectFit: 'cover',
+                                          border: '1px solid rgba(255,255,255,0.12)'
+                                        }}
+                                        loading="lazy"
+                                      />
+                                    ) : (
+                                      <div className="chip" style={{ width: 28, height: 28, borderRadius: 8 }} />
+                                    )}
+                                    <div style={{ lineHeight: 1.1 }}>
+                                      <strong>{o.provider}</strong>
+                                      <div className="tagline" style={{ marginTop: 4 }}>
+                                        {(o.offerType ? o.offerType : '') + (o.region ? ` · ${o.region}` : '')}
+                                      </div>
+                                    </div>
+                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                      {o.url ? (
+                                        <a className="ghost-button" href={o.url} target="_blank" rel="noreferrer">
+                                          Source URL
+                                        </a>
+                                      ) : null}
+                                      <span className="chip" title="Deep link source">
+                                        {o.deepLinkSource ? String(o.deepLinkSource) : 'auto'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <input
+                                    className="input"
+                                    value={d.deepLink}
+                                    onChange={(e) =>
+                                      setOttDrafts((p) => ({ ...p, [String(o.id)]: { deepLink: e.target.value } }))
+                                    }
+                                    placeholder={readonly ? 'Deep links apply to Streaming offers' : 'Deep link (https://...)'}
+                                    style={{ marginTop: 10 }}
+                                    readOnly={readonly}
+                                    title={
+                                      readonly
+                                        ? 'Deep links are only used for Streaming offers.'
+                                        : 'Set a direct link to the movie on the platform.'
+                                    }
+                                  />
+                                  {o.deepLinkVerifiedAt ? (
+                                    <div className="tagline" style={{ marginTop: 6 }}>
+                                      Verified: {o.deepLinkVerifiedAt}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  <button
+                                    className="ghost-button"
+                                    type="button"
+                                    disabled={!token || readonly}
+                                    onClick={async () => {
+                                      if (!token || !editor?.movieId || readonly) return;
+                                      setLoading(true);
+                                      setError(null);
+                                      try {
+                                        await postJson(
+                                          `/api/admin/movies/${encodeURIComponent(editor.movieId)}/ott/${encodeURIComponent(String(o.id))}/deeplink`,
+                                          { deepLink: d.deepLink },
+                                          token
+                                        );
+                                        await loadEditor(token, editor.movieId);
+                                      } catch (e: any) {
+                                        setError(e?.message || 'Save failed');
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    className="ghost-button"
+                                    type="button"
+                                    disabled={!token || readonly}
+                                    onClick={async () => {
+                                      if (!token || !editor?.movieId || readonly) return;
+                                      setLoading(true);
+                                      setError(null);
+                                      try {
+                                        await postJson(
+                                          `/api/admin/movies/${encodeURIComponent(editor.movieId)}/ott/${encodeURIComponent(String(o.id))}/deeplink`,
+                                          { deepLink: '' },
+                                          token
+                                        );
+                                        await loadEditor(token, editor.movieId);
+                                      } catch (e: any) {
+                                        setError(e?.message || 'Clear failed');
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="tagline" style={{ marginTop: 10 }}>
+                          No OTT offers saved locally for this movie yet. Refresh the movie to fetch offers and deeplinks.
+                        </div>
+                      )}
                     </div>
 
                     <div className="detail" style={{ marginTop: 14 }}>

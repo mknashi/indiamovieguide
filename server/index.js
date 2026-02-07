@@ -214,6 +214,7 @@ async function enrichOttDeepLinksForMovie(movieId, tmdbId, { country = 'in', for
           WHERE movie_id = ?
             AND offer_type = 'Streaming'
             AND lower(provider) = lower(?)
+            AND NOT (COALESCE(deep_link_source, '') = 'admin' AND COALESCE(deep_link, '') != '')
         `
         )
         .run(deepLink, 'motn', ts, movieId, provider);
@@ -3042,7 +3043,76 @@ app.get('/api/admin/movies/:id', async (req, res) => {
       billingOrder: typeof r.billing_order === 'number' ? r.billing_order : null
     }));
 
-  res.json({ movieId, movie, songs, cast });
+  const ottOffers = db
+    .prepare(
+      `
+      SELECT id, provider, offer_type, url, logo, region, source, deep_link, deep_link_source, deep_link_verified_at, created_at
+      FROM ott_offers
+      WHERE movie_id = ?
+      ORDER BY
+        CASE WHEN offer_type = 'Streaming' THEN 0 ELSE 1 END,
+        lower(provider) ASC,
+        created_at DESC
+    `
+    )
+    .all(movieId)
+    .map((o) => ({
+      id: o.id,
+      provider: o.provider,
+      offerType: o.offer_type,
+      region: o.region || '',
+      url: o.url || '',
+      logo: o.logo || '',
+      source: o.source || '',
+      deepLink: o.deep_link || '',
+      deepLinkSource: o.deep_link_source || '',
+      deepLinkVerifiedAt: o.deep_link_verified_at || null,
+      createdAt: o.created_at
+    }));
+
+  res.json({ movieId, movie, songs, cast, ottOffers });
+});
+
+app.post('/api/admin/movies/:id/ott/:ottId/deeplink', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const movieId = normalizeMovieIdInput(req.params.id);
+  const ottId = String(req.params.ottId || '').trim();
+  if (!movieId || !ottId) return res.status(400).json({ error: 'bad_request' });
+
+  const deepLinkRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'deepLink') ? String(req.body?.deepLink || '') : '';
+  const deepLink = deepLinkRaw.trim().slice(0, 800);
+  if (deepLink && !(deepLink.startsWith('https://') || deepLink.startsWith('http://'))) {
+    return res.status(400).json({ error: 'invalid_deeplink' });
+  }
+
+  const row = db.prepare('SELECT id FROM ott_offers WHERE id = ? AND movie_id = ?').get(ottId, movieId);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+
+  if (!deepLink) {
+    db.prepare(
+      `
+      UPDATE ott_offers
+      SET deep_link = NULL,
+          deep_link_source = NULL,
+          deep_link_verified_at = NULL
+      WHERE id = ? AND movie_id = ?
+    `
+    ).run(ottId, movieId);
+  } else {
+    db.prepare(
+      `
+      UPDATE ott_offers
+      SET deep_link = ?,
+          deep_link_source = 'admin',
+          deep_link_verified_at = ?
+      WHERE id = ? AND movie_id = ?
+    `
+    ).run(deepLink, nowIso(), ottId, movieId);
+  }
+
+  res.json({ ok: true });
 });
 
 app.post('/api/admin/movies/:id/update', (req, res) => {
