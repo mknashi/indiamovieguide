@@ -110,16 +110,47 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
   }
 
   // OTT offers
+  const existingOtt = db
+    .prepare(
+      `
+      SELECT provider, offer_type, region, deep_link, deep_link_source, deep_link_verified_at
+      FROM ott_offers
+      WHERE movie_id = ?
+    `
+    )
+    .all(id);
+  const ottByKey = new Map();
+  for (const r of existingOtt || []) {
+    const k = `${String(r.provider || '').toLowerCase()}|${String(r.offer_type || '').toLowerCase()}|${String(r.region || '').toLowerCase()}`;
+    ottByKey.set(k, r);
+  }
+
   db.prepare('DELETE FROM ott_offers WHERE movie_id = ?').run(id);
   for (const o of tmdbMovie.offers || []) {
     const offerId = hashId('ott', `${id}:${o.provider}:${o.type}:${o.region || ''}`);
+    const k = `${String(o.provider || '').toLowerCase()}|${String(o.type || '').toLowerCase()}|${String(o.region || '').toLowerCase()}`;
+    const prev = ottByKey.get(k);
     db.prepare(
       `
       INSERT OR REPLACE INTO ott_offers (
-        id, movie_id, provider, offer_type, url, logo, region, source, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, movie_id, provider, offer_type, url, logo, region, source, created_at,
+        deep_link, deep_link_source, deep_link_verified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
-    ).run(offerId, id, o.provider, o.type, o.url || '', o.logo || '', o.region || '', 'tmdb', nowIso());
+    ).run(
+      offerId,
+      id,
+      o.provider,
+      o.type,
+      o.url || '',
+      o.logo || '',
+      o.region || '',
+      'tmdb',
+      nowIso(),
+      prev?.deep_link || '',
+      prev?.deep_link_source || '',
+      prev?.deep_link_verified_at || ''
+    );
   }
 
   db.prepare(
@@ -481,7 +512,7 @@ export function hydrateMovie(db, movieId) {
       provider: o.provider,
       type: o.offer_type,
       url: o.url || undefined,
-      deepLink: undefined,
+      deepLink: o.deep_link || undefined,
       logo: o.logo || undefined,
       region: o.region || undefined
     }));

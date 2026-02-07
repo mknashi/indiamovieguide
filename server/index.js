@@ -34,6 +34,7 @@ import {
   wikipediaSummaryByTitle
 } from './providers/wikipedia.js';
 import { itunesFindSoundtrackForMovie } from './providers/itunes.js';
+import { motnGetDeepLinksForTmdbMovie } from './providers/motn.js';
 import { hashId, INDIAN_LANGUAGES_LOWER, makeId, normalizeForSearch, nowIso, soundex, statusFrom, toIsoDate } from './repo.js';
 import { omdbByTitle } from './providers/omdb.js';
 import {
@@ -123,6 +124,113 @@ function metaSet(key, value) {
     );
   } catch {
     // ignore
+  }
+}
+
+function isoDay() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function motnCircuitIsOpen() {
+  const until = metaGetNumber('motn_quota_until');
+  return until && Date.now() < until ? until : 0;
+}
+
+function motnBumpDailyCount() {
+  const k = `motn_daily_count:${isoDay()}`;
+  const v = metaGetNumber(k) || 0;
+  metaSet(k, String(v + 1));
+  return v + 1;
+}
+
+function motnDailyCount() {
+  return metaGetNumber(`motn_daily_count:${isoDay()}`) || 0;
+}
+
+async function enrichOttDeepLinksForMovie(movieId, tmdbId, { country = 'in', force = false, debug = false } = {}) {
+  const key = String(process.env.MOTN_API_KEY || '').trim();
+  if (!key) return { ok: false, skipped: true, reason: 'missing_key' };
+
+  const circuitUntil = motnCircuitIsOpen();
+  if (circuitUntil) return { ok: false, skipped: true, reason: 'circuit_open', until: new Date(circuitUntil).toISOString() };
+
+  const dailyBudget = Math.max(0, Math.min(5000, Number(process.env.MOTN_DAILY_BUDGET || 0) || 80));
+  if (dailyBudget > 0 && motnDailyCount() >= dailyBudget) {
+    return { ok: false, skipped: true, reason: 'daily_budget' };
+  }
+
+  const ttlHours = Math.max(6, Math.min(24 * 30, Number(process.env.MOTN_DEEPLINK_TTL_HOURS || 0) || 24 * 14)); // default 14 days
+  const attemptMinutes = Math.max(10, Math.min(24 * 60, Number(process.env.MOTN_ATTEMPT_MINUTES || 0) || 180)); // default 3h
+  const ttlMs = ttlHours * 60 * 60 * 1000;
+  const attemptMs = attemptMinutes * 60 * 1000;
+
+  const haveDeepLink =
+    db
+      .prepare(
+        `
+        SELECT COUNT(*) as c
+        FROM ott_offers
+        WHERE movie_id = ?
+          AND offer_type = 'Streaming'
+          AND COALESCE(deep_link, '') != ''
+      `
+      )
+      .get(movieId)?.c || 0;
+  const lastVerified = db
+    .prepare(
+      `
+      SELECT MAX(deep_link_verified_at) as t
+      FROM ott_offers
+      WHERE movie_id = ?
+        AND offer_type = 'Streaming'
+        AND COALESCE(deep_link, '') != ''
+    `
+    )
+    .get(movieId)?.t;
+  const lastVerifiedMs = lastVerified ? Date.parse(String(lastVerified)) : 0;
+  const freshEnough = lastVerifiedMs && Date.now() - lastVerifiedMs < ttlMs;
+  if (!force && haveDeepLink && freshEnough) return { ok: true, skipped: true, reason: 'fresh' };
+
+  const attemptKey = `motn_last_attempt_at:${movieId}`;
+  const lastAttemptAt = metaGetNumber(attemptKey) || 0;
+  if (!force && lastAttemptAt && Date.now() - lastAttemptAt < attemptMs) return { ok: false, skipped: true, reason: 'attempt_ttl' };
+  metaSet(attemptKey, String(Date.now()));
+
+  try {
+    motnBumpDailyCount();
+    const rows = await motnGetDeepLinksForTmdbMovie(tmdbId, { country });
+    const ts = nowIso();
+    let updated = 0;
+    for (const r of rows || []) {
+      const provider = String(r.provider || '').trim();
+      const deepLink = String(r.deepLink || '').trim();
+      if (!provider || !deepLink) continue;
+      const res = db
+        .prepare(
+          `
+          UPDATE ott_offers
+          SET deep_link = ?,
+              deep_link_source = ?,
+              deep_link_verified_at = ?
+          WHERE movie_id = ?
+            AND offer_type = 'Streaming'
+            AND lower(provider) = lower(?)
+            AND NOT (COALESCE(deep_link_source, '') = 'admin' AND COALESCE(deep_link, '') != '')
+        `
+        )
+        .run(deepLink, 'motn', ts, movieId, provider);
+      if (res?.changes) updated += res.changes;
+    }
+    if (debug) console.log('[motn] deeplinks updated', { movieId, tmdbId, updated, got: rows?.length || 0 });
+    return { ok: true, updated, got: rows?.length || 0 };
+  } catch (e) {
+    const status = Number(e?.status || 0) || 0;
+    if (status === 429 || status === 403) {
+      const pauseMinutes = Math.max(10, Math.min(24 * 60, Number(process.env.MOTN_PAUSE_MINUTES || 0) || 360)); // 6h
+      metaSet('motn_quota_until', String(Date.now() + pauseMinutes * 60 * 1000));
+    }
+    if (debug) console.log('[motn] deeplinks failed', { movieId, tmdbId, status, message: String(e?.message || e) });
+    return { ok: false, error: String(e?.message || e || 'motn_failed'), status };
   }
 }
 
@@ -667,6 +775,8 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     // Only auto-refresh songs on explicit movie page loads (to limit provider usage).
     const autoSongs = opts?.autoSongs === true;
     const autoOtt = opts?.autoOtt === true;
+    const autoDeeplinks = opts?.autoDeeplinks === true;
+    const forceDeeplinks = opts?.forceDeeplinks === true;
     const needsSongsRefresh = autoSongs && (missingSongs || missingPlayableSongs) && adminSongCount === 0;
 
     const storedStatus = String(row?.status || '').trim();
@@ -1010,10 +1120,17 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         cast: castNames.map((n) => ({ name: n }))
       };
       await refreshSongsIfNeeded(pseudoFull);
+      if (autoDeeplinks || forceDeeplinks) {
+        await enrichOttDeepLinksForMovie(movieId, tmdbId, {
+          country: String(process.env.MOTN_COUNTRY || 'in'),
+          force: forceDeeplinks,
+          debug: opts?.debug === true
+        });
+      }
       return;
     }
 
-    if (!forceFull && lastUpdatedMs && Date.now() - lastUpdatedMs < ttlMs) {
+    if (!needsOttRefresh && !forceFull && lastUpdatedMs && Date.now() - lastUpdatedMs < ttlMs) {
       // Still allow song refresh (auto/forced) even inside the details TTL.
       const castNames = db
         .prepare(
@@ -1029,12 +1146,20 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
         .all(movieId)
         .map((x) => x?.name)
         .filter(Boolean);
-      await refreshSongsIfNeeded({
+      const pseudoFull = {
         title: row?.title || '',
         language: row?.language || '',
         releaseDate: row?.release_date || '',
         cast: castNames.map((n) => ({ name: n }))
-      });
+      };
+      await refreshSongsIfNeeded(pseudoFull);
+      if (autoDeeplinks || forceDeeplinks) {
+        await enrichOttDeepLinksForMovie(movieId, tmdbId, {
+          country: String(process.env.MOTN_COUNTRY || 'in'),
+          force: forceDeeplinks,
+          debug: opts?.debug === true
+        });
+      }
       return;
     }
 
@@ -1044,6 +1169,13 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
     if (autoOtt || forceFull) {
       metaSet(ottAttemptKey, String(Date.now()));
       metaSet(ottSuccessKey, String(Date.now()));
+    }
+    if (autoDeeplinks || forceDeeplinks) {
+      await enrichOttDeepLinksForMovie(movieId, tmdbId, {
+        country: String(process.env.MOTN_COUNTRY || 'in'),
+        force: forceDeeplinks,
+        debug: opts?.debug === true
+      });
     }
 
     if (!full.trailerUrl) {
@@ -3160,7 +3292,76 @@ app.get('/api/admin/movies/:id', async (req, res) => {
       billingOrder: typeof r.billing_order === 'number' ? r.billing_order : null
     }));
 
-  res.json({ movieId, movie, songs, cast });
+  const ottOffers = db
+    .prepare(
+      `
+      SELECT id, provider, offer_type, url, logo, region, source, deep_link, deep_link_source, deep_link_verified_at, created_at
+      FROM ott_offers
+      WHERE movie_id = ?
+      ORDER BY
+        CASE WHEN offer_type = 'Streaming' THEN 0 ELSE 1 END,
+        lower(provider) ASC,
+        created_at DESC
+    `
+    )
+    .all(movieId)
+    .map((o) => ({
+      id: o.id,
+      provider: o.provider,
+      offerType: o.offer_type,
+      region: o.region || '',
+      url: o.url || '',
+      logo: o.logo || '',
+      source: o.source || '',
+      deepLink: o.deep_link || '',
+      deepLinkSource: o.deep_link_source || '',
+      deepLinkVerifiedAt: o.deep_link_verified_at || null,
+      createdAt: o.created_at
+    }));
+
+  res.json({ movieId, movie, songs, cast, ottOffers });
+});
+
+app.post('/api/admin/movies/:id/ott/:ottId/deeplink', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+
+  const movieId = normalizeMovieIdInput(req.params.id);
+  const ottId = String(req.params.ottId || '').trim();
+  if (!movieId || !ottId) return res.status(400).json({ error: 'bad_request' });
+
+  const deepLinkRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'deepLink') ? String(req.body?.deepLink || '') : '';
+  const deepLink = deepLinkRaw.trim().slice(0, 800);
+  if (deepLink && !(deepLink.startsWith('https://') || deepLink.startsWith('http://'))) {
+    return res.status(400).json({ error: 'invalid_deeplink' });
+  }
+
+  const row = db.prepare('SELECT id FROM ott_offers WHERE id = ? AND movie_id = ?').get(ottId, movieId);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+
+  if (!deepLink) {
+    db.prepare(
+      `
+      UPDATE ott_offers
+      SET deep_link = NULL,
+          deep_link_source = NULL,
+          deep_link_verified_at = NULL
+      WHERE id = ? AND movie_id = ?
+    `
+    ).run(ottId, movieId);
+  } else {
+    db.prepare(
+      `
+      UPDATE ott_offers
+      SET deep_link = ?,
+          deep_link_source = 'admin',
+          deep_link_verified_at = ?
+      WHERE id = ? AND movie_id = ?
+    `
+    ).run(deepLink, nowIso(), ottId, movieId);
+  }
+
+  res.json({ ok: true });
 });
 
 app.post('/api/admin/movies/:id/update', (req, res) => {
@@ -3991,6 +4192,7 @@ app.get('/api/movies/:id', async (req, res) => {
     await enrichMovieIfNeeded(movieId, {
       forceFull: true,
       forceSongs: true,
+      forceDeeplinks: true,
       wikiTitleOverride: safeWikiTitle ? safeWikiTitle.replace(/_/g, ' ') : '',
       debug,
       autoOtt: true
