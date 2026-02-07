@@ -86,6 +86,7 @@ The app can enrich data on-demand (via `/api/search`), but you can also run a ba
   - `TMDB_API_KEY` or `TMDB_BEARER_TOKEN` – required for ingestion.
   - `YOUTUBE_API_KEY` – optional; adds trailer fallback + song links.
   - `OMDB_API_KEY` – optional; adds extra rating sources.
+  - `MOTN_API_KEY` – optional; fetches provider deeplinks (Movie of the Night / Streaming Availability via RapidAPI). Keep server-side only.
   - `AGENT_LIMIT`, `AGENT_DAYS_PAST`, `AGENT_DAYS_FUTURE`, `AGENT_LANGS`, `AGENT_ENRICH`
 
 Run it:
@@ -115,6 +116,14 @@ The server keeps the home page fast by reading shelves from SQLite and doing pro
 If the DB is empty (or a language is sparse), it will seed from TMDB.
 
 These are **backend** environment variables (set them on the Node server / Render Web Service). They are *not* `VITE_*`.
+
+**OTT deeplinks (optional)**
+- `MOTN_API_KEY`: RapidAPI key for Movie of the Night / Streaming Availability (deeplinks). Keep server-side only.
+- `MOTN_COUNTRY` (default `in`): country code for deeplinks (e.g. `in`, `us`).
+- `MOTN_DAILY_BUDGET` (default `80`): safety cap for deeplink lookups per day.
+- `MOTN_DEEPLINK_TTL_HOURS` (default `336`): how long deeplinks are considered fresh (default 14 days).
+- `MOTN_ATTEMPT_MINUTES` (default `180`): minimum time between retries per movie when deeplinks fail.
+- `MOTN_PAUSE_MINUTES` (default `360`): circuit-breaker pause when quota is hit.
 
 **Home shelf seeding (New/Upcoming)**
 - `HOME_SEED_PAGES` (default `2`, max `5`): how many TMDB discover pages to scan per shelf.

@@ -140,7 +140,8 @@ export function MovieCard({ movie }: { movie: Movie }) {
           <div className="meta card-row-chips">
             {offers.length ? (
               offers.slice(0, 3).map((o) => {
-                const out = o.deepLink || directUrlForOffer(o.provider) || o.url || '';
+                // Prefer TMDB/JustWatch movie pages over provider search links (more accurate).
+                const out = o.deepLink || o.url || directUrlForOffer(o.provider) || '';
                 return (
                   <a
                     key={`${o.provider}-${o.type}`}

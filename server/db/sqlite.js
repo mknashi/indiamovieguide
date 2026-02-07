@@ -306,6 +306,17 @@ export function migrate(db) {
     db.exec('ALTER TABLE user_person_submissions ADD COLUMN person_id TEXT');
   }
 
+  // Deeplink support for OTT offers (Movie of the Night / provider links).
+  if (!hasColumn('ott_offers', 'deep_link')) {
+    db.exec('ALTER TABLE ott_offers ADD COLUMN deep_link TEXT');
+  }
+  if (!hasColumn('ott_offers', 'deep_link_source')) {
+    db.exec('ALTER TABLE ott_offers ADD COLUMN deep_link_source TEXT');
+  }
+  if (!hasColumn('ott_offers', 'deep_link_verified_at')) {
+    db.exec('ALTER TABLE ott_offers ADD COLUMN deep_link_verified_at TEXT');
+  }
+
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_is_indian ON movies(is_indian)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_soundex ON movies(title_soundex)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_norm ON movies(title_norm)');
