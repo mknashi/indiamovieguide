@@ -4594,9 +4594,24 @@ app.get('/api/streaming', (req, res) => {
   const ids = db
     .prepare(
       `
-      SELECT DISTINCT m.id as id
-      ${where}
-      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
+      SELECT
+        m.id as id,
+        MAX(CASE WHEN r.source = 'imdb' AND r.scale = 10 THEN r.value ELSE NULL END) as imdb_rating,
+        MAX(CASE WHEN r.source = 'tmdb' AND r.scale = 10 THEN r.value ELSE NULL END) as tmdb_rating,
+        MAX(COALESCE(m.release_date, '0000-00-00')) as release_date,
+        MIN(m.title) as title
+      FROM ott_offers o
+      JOIN movies m ON m.id = o.movie_id
+      LEFT JOIN movie_genres mg ON mg.movie_id = m.id
+      LEFT JOIN ratings r ON r.movie_id = m.id
+      WHERE o.offer_type = 'Streaming'
+        AND COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(o.provider) = lower(?))
+        AND (? = '' OR lower(m.language) = lower(?))
+        AND (? = '' OR lower(mg.genre) = lower(?))
+        AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
+      GROUP BY m.id
+      ORDER BY COALESCE(imdb_rating, tmdb_rating, -1) DESC, release_date DESC, title ASC
       LIMIT ? OFFSET ?
     `
     )
