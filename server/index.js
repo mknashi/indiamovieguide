@@ -308,6 +308,25 @@ function personSeoFilmographyRows(personId, limit = 30) {
     .all(String(personId || ''), Math.max(1, Math.min(100, Number(limit) || 30)));
 }
 
+async function personSeoFilmographyRowsWithFallback(personId, tmdbId, limit = 30) {
+  const localRows = personSeoFilmographyRows(personId, limit);
+  if (localRows.length || !Number.isFinite(Number(tmdbId)) || Number(tmdbId) <= 0) return localRows;
+
+  try {
+    // Fallback to TMDB when local cast joins are missing so SSR source still exposes crawlable filmography.
+    const full = await tmdbGetPersonFull(Number(tmdbId));
+    return (full?.filmography || []).slice(0, limit).map((f) => ({
+      movie_id: f?.tmdbId ? makeId('tmdb-movie', Number(f.tmdbId)) : '',
+      tmdb_id: typeof f?.tmdbId === 'number' ? f.tmdbId : null,
+      title: String(f?.title || '').trim(),
+      release_date: String(f?.releaseDate || '').trim(),
+      character: String(f?.character || '').trim()
+    }));
+  } catch {
+    return localRows;
+  }
+}
+
 function absUrl(url, base) {
   const u = String(url || '').trim();
   if (!u) return '';
@@ -360,7 +379,7 @@ function injectPrerender(html, prerenderHtml) {
   return html.replace(marker, prerenderHtml || '');
 }
 
-function seoForPath(req, canonical, siteUrl) {
+async function seoForPath(req, canonical, siteUrl) {
   const defaultTitle = 'IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers';
   const defaultDesc =
     'IndiaMovieGuide — a modern guide to Indian cinema. Discover new and upcoming movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs.';
@@ -483,7 +502,7 @@ function seoForPath(req, canonical, siteUrl) {
     const personId = tmdbId ? makeId('tmdb-person', tmdbId) : raw.includes(':') ? raw : raw;
     const p = hydratePerson(db, personId);
     if (p) {
-      const filmography = personSeoFilmographyRows(personId, 36);
+      const filmography = await personSeoFilmographyRowsWithFallback(personId, tmdbId, 36);
       const title = `${p.name} — Profile · IndiaMovieGuide`;
       const desc = clampText(p.biography || `Explore ${p.name}'s bio and filmography on IndiaMovieGuide.`, 180);
       const img = absUrl(p.profileImage || ogDefault, siteUrl);
@@ -4739,7 +4758,7 @@ if (fs.existsSync(DIST_DIR)) {
     })
   );
 
-  app.get('*', (req, res, next) => {
+  app.get('*', async (req, res, next) => {
     if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api')) return next();
     if (!hasDistBuild()) return next();
@@ -4748,7 +4767,7 @@ if (fs.existsSync(DIST_DIR)) {
       const html = fs.readFileSync(DIST_INDEX, 'utf-8');
       const canonical = canonicalUrlFor(req);
       const siteUrl = SITE_URL || canonical.replace(/\/+$/, '');
-      const seo = seoForPath(req, canonical, siteUrl);
+      const seo = await seoForPath(req, canonical, siteUrl);
 
       let out = html
         .replaceAll('__CANONICAL_URL__', canonical)
