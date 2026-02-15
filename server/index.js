@@ -4611,7 +4611,7 @@ app.get('/api/streaming', (req, res) => {
         AND (? = '' OR lower(mg.genre) = lower(?))
         AND (? = '' OR lower(COALESCE(o.region, '')) = lower(?))
       GROUP BY m.id
-      ORDER BY COALESCE(imdb_rating, tmdb_rating, -1) DESC, release_date DESC, title ASC
+      ORDER BY release_date DESC, COALESCE(imdb_rating, tmdb_rating, -1) DESC, title ASC
       LIMIT ? OFFSET ?
     `
     )
