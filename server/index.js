@@ -285,6 +285,29 @@ function clampText(s, max) {
   return t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
 }
 
+function personSeoFilmographyRows(personId, limit = 30) {
+  return db
+    .prepare(
+      `
+      SELECT
+        m.id as movie_id,
+        m.tmdb_id as tmdb_id,
+        m.title as title,
+        m.release_date as release_date,
+        mc.character as character
+      FROM movie_cast mc
+      JOIN movies m ON m.id = mc.movie_id
+      WHERE mc.person_id = ?
+      ORDER BY
+        CASE WHEN COALESCE(m.release_date, '') = '' THEN 1 ELSE 0 END ASC,
+        COALESCE(m.release_date, '0000-00-00') DESC,
+        m.title ASC
+      LIMIT ?
+    `
+    )
+    .all(String(personId || ''), Math.max(1, Math.min(100, Number(limit) || 30)));
+}
+
 function absUrl(url, base) {
   const u = String(url || '').trim();
   if (!u) return '';
@@ -362,13 +385,51 @@ function seoForPath(req, canonical, siteUrl) {
       const title = `${m.title}${year ? ` (${year})` : ''} — IndiaMovieGuide`;
       const desc = clampText(m.synopsis || `Explore ${m.title} on IndiaMovieGuide.`, 180);
       const img = absUrl(m.backdrop || m.poster || ogDefault, siteUrl);
-      const castNames = (m.cast || []).slice(0, 6).map((c) => c?.name).filter(Boolean);
-      const castText = castNames.length ? `<p><strong>Cast:</strong> ${escapeHtml(castNames.join(', '))}</p>` : '';
+      const castLinks = (m.cast || [])
+        .slice(0, 8)
+        .filter((c) => c?.name)
+        .map((c) => {
+          const href = c?.tmdbId ? `/person/${encodeURIComponent(String(c.tmdbId))}` : '';
+          const label = escapeHtml(String(c.name || ''));
+          return href ? `<li style="margin:0 0 4px;"><a href="${escapeAttr(href)}">${label}</a></li>` : `<li style="margin:0 0 4px;">${label}</li>`;
+        })
+        .join('');
+      const castSection = castLinks
+        ? `<section aria-label="Cast"><h2 style="margin:0 0 8px;font-size:18px;">Cast</h2><ul style="margin:0;padding-left:18px;">${castLinks}</ul></section>`
+        : '';
+      const ottLinks = (m.ott || [])
+        .slice(0, 8)
+        .filter((o) => o?.provider)
+        .map((o) => {
+          const out = o?.deepLink || o?.url || '';
+          const provider = escapeHtml(String(o.provider || ''));
+          const suffix = o?.type ? ` <span style="color:#94a3b8;">(${escapeHtml(String(o.type || ''))})</span>` : '';
+          if (!out) return `<li style="margin:0 0 4px;">${provider}${suffix}</li>`;
+          return `<li style="margin:0 0 4px;"><a href="${escapeAttr(String(out))}">${provider}</a>${suffix}</li>`;
+        })
+        .join('');
+      const ottSection = ottLinks
+        ? `<section aria-label="Where to watch" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">Where to watch</h2><ul style="margin:0;padding-left:18px;">${ottLinks}</ul></section>`
+        : '';
+      const songLinks = (m.songs || [])
+        .slice(0, 10)
+        .filter((s) => s?.title)
+        .map((s) => {
+          const songTitle = escapeHtml(String(s.title || ''));
+          if (!s?.youtubeUrl) return `<li style="margin:0 0 4px;">${songTitle}</li>`;
+          return `<li style="margin:0 0 4px;"><a href="${escapeAttr(String(s.youtubeUrl))}">${songTitle}</a></li>`;
+        })
+        .join('');
+      const songsSection = songLinks
+        ? `<section aria-label="Songs" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">Songs</h2><ul style="margin:0;padding-left:18px;">${songLinks}</ul></section>`
+        : '';
       const pre =
         `<div style="padding:16px 20px;">` +
         `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(m.title)}</h1>` +
         `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
-        castText +
+        castSection +
+        ottSection +
+        songsSection +
         `</div>`;
 
       const json = JSON.stringify(
@@ -422,24 +483,67 @@ function seoForPath(req, canonical, siteUrl) {
     const personId = tmdbId ? makeId('tmdb-person', tmdbId) : raw.includes(':') ? raw : raw;
     const p = hydratePerson(db, personId);
     if (p) {
+      const filmography = personSeoFilmographyRows(personId, 36);
       const title = `${p.name} — Profile · IndiaMovieGuide`;
       const desc = clampText(p.biography || `Explore ${p.name}'s bio and filmography on IndiaMovieGuide.`, 180);
       const img = absUrl(p.profileImage || ogDefault, siteUrl);
+      const filmographyList = filmography.length
+        ? `<section aria-label="Filmography">` +
+          `<h2 style="margin:0 0 8px;font-size:18px;">Filmography</h2>` +
+          `<ul style="margin:0;padding-left:18px;">` +
+          filmography
+            .slice(0, 24)
+            .map((f) => {
+              const moviePath = f.tmdb_id
+                ? `/movie/${encodeURIComponent(String(f.tmdb_id))}`
+                : `/movie/${encodeURIComponent(String(f.movie_id || ''))}`;
+              const year = String(f.release_date || '').slice(0, 4);
+              const suffix = [
+                year ? `(${escapeHtml(year)})` : '',
+                f.character ? `as ${escapeHtml(String(f.character))}` : ''
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return `<li style="margin:0 0 4px;"><a href="${escapeAttr(moviePath)}">${escapeHtml(String(f.title || 'Untitled'))}</a>${suffix ? ` <span style="color:#94a3b8;">${suffix}</span>` : ''}</li>`;
+            })
+            .join('') +
+          `</ul>` +
+          `</section>`
+        : '';
       const pre =
         `<div style="padding:16px 20px;">` +
         `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(p.name)}</h1>` +
         `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+        filmographyList +
         `</div>`;
+      const personJsonLd = {
+        '@context': 'https://schema.org',
+        '@type': 'Person',
+        name: p.name,
+        url: canonical,
+        description: clampText(p.biography || '', 420),
+        image: p.profileImage || undefined,
+        sameAs: [p.wikiUrl || '', tmdbId ? `https://www.themoviedb.org/person/${tmdbId}` : ''].filter(Boolean)
+      };
+      const filmographyJsonLd = filmography.length
+        ? {
+            '@context': 'https://schema.org',
+            '@type': 'ItemList',
+            name: `${p.name} filmography`,
+            itemListElement: filmography.slice(0, 24).map((f, i) => ({
+              '@type': 'ListItem',
+              position: i + 1,
+              item: {
+                '@type': 'Movie',
+                name: String(f.title || ''),
+                url: `${siteUrl}${f.tmdb_id ? `/movie/${encodeURIComponent(String(f.tmdb_id))}` : `/movie/${encodeURIComponent(String(f.movie_id || ''))}`}`,
+                datePublished: f.release_date || undefined
+              }
+            }))
+          }
+        : null;
       const json = JSON.stringify(
-        {
-          '@context': 'https://schema.org',
-          '@type': 'Person',
-          name: p.name,
-          url: canonical,
-          description: clampText(p.biography || '', 420),
-          image: p.profileImage || undefined,
-          sameAs: [p.wikiUrl || '', tmdbId ? `https://www.themoviedb.org/person/${tmdbId}` : ''].filter(Boolean)
-        },
+        filmographyJsonLd ? { '@graph': [personJsonLd, filmographyJsonLd] } : personJsonLd,
         null,
         0
       );
