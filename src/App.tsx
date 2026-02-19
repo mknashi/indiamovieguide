@@ -18,6 +18,7 @@ import { TrailerPage } from './pages/TrailerPage';
 import { SongPage } from './pages/SongPage';
 import { MovieReviewsPage } from './pages/MovieReviewsPage';
 import { StreamingPage } from './pages/StreamingPage';
+import { initAnalytics, trackPageView } from './services/analytics';
 
 const LANG_ORDER = [
   'All',
@@ -41,6 +42,14 @@ export default function App() {
   const route = useRoute();
   const activeLang = currentLangFromRoute(route);
   const [me, setMe] = useState<any>(null);
+
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
+  useEffect(() => {
+    trackPageView(`${window.location.pathname}${window.location.search}`);
+  }, [route]);
 
   useEffect(() => {
     // Preserve the user's last "listing" context (home/search/streaming/etc) so the Movie back button can return there.

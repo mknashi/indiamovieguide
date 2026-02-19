@@ -10,6 +10,11 @@ npm run dev
 
 If you prefer Yarn or pnpm, adjust commands accordingly.
 
+## Google Analytics (GA4)
+- Add your GA4 Measurement ID to `.env`:
+  - `VITE_GA_MEASUREMENT_ID=G-XXXXXXXXXX`
+- The app will automatically load `gtag.js` and track client-side page views on route changes.
+
 ## Tech stack
 - React 18 + TypeScript
 - Vite bundler
