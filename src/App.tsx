@@ -18,7 +18,10 @@ import { TrailerPage } from './pages/TrailerPage';
 import { SongPage } from './pages/SongPage';
 import { MovieReviewsPage } from './pages/MovieReviewsPage';
 import { StreamingPage } from './pages/StreamingPage';
+import { MoviesIndexPage } from './pages/MoviesIndexPage';
+import { PeopleIndexPage } from './pages/PeopleIndexPage';
 import { initAnalytics, trackPageView } from './services/analytics';
+import { languageFromSlug } from './utils/slugs';
 
 const LANG_ORDER = [
   'All',
@@ -34,6 +37,7 @@ const LANG_ORDER = [
 function currentLangFromRoute(route: ReturnType<typeof useRoute>): string {
   if (route.name === 'home') return route.lang || 'All';
   if (route.name === 'streaming') return route.lang || 'All';
+  if (route.name === 'language') return languageFromSlug(route.slug) || 'All';
   // Keep language selector available even off-home; default to All.
   return 'All';
 }
@@ -178,6 +182,10 @@ export default function App() {
 	      <main className="app-main">
 	        {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
 	        {route.name === 'streaming' && <StreamingPage lang={route.lang} provider={route.provider} />}
+	        {route.name === 'movies' && <MoviesIndexPage mode="all" />}
+	        {route.name === 'language' && <MoviesIndexPage mode="language" slug={route.slug} />}
+	        {route.name === 'genre' && <MoviesIndexPage mode="genre" slug={route.slug} />}
+	        {route.name === 'people' && <PeopleIndexPage />}
 	        {route.name === 'search' && <SearchPage q={route.q} />}
 	        {route.name === 'movie' && <MoviePage id={route.id} />}
         {route.name === 'movie_reviews' && <MovieReviewsPage id={route.id} />}
@@ -224,6 +232,28 @@ export default function App() {
             }}
           >
             Add New Movie
+          </a>
+          <span className="footer-sep">·</span>
+          <a
+            href="/movies"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              navigate('/movies');
+            }}
+          >
+            Movies
+          </a>
+          <span className="footer-sep">·</span>
+          <a
+            href="/people"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              navigate('/people');
+            }}
+          >
+            People
           </a>
           <span className="footer-sep">·</span>
           <a

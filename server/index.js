@@ -379,6 +379,134 @@ function injectPrerender(html, prerenderHtml) {
   return html.replace(marker, prerenderHtml || '');
 }
 
+function toPathSlug(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function decodePathLabel(value) {
+  return decodeURIComponent(String(value || ''))
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function titleCaseLabel(value) {
+  return String(value || '')
+    .split(/\s+/g)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function resolveLanguageFromSlug(slug) {
+  const target = toPathSlug(slug);
+  if (!target) return '';
+
+  const localLanguages = db
+    .prepare(
+      `
+      SELECT language
+      FROM movies
+      WHERE COALESCE(is_indian, 1) = 1
+        AND COALESCE(language, '') != ''
+      GROUP BY language
+      ORDER BY COUNT(*) DESC, language ASC
+      LIMIT 50
+    `
+    )
+    .all()
+    .map((r) => String(r.language || '').trim())
+    .filter(Boolean);
+
+  const candidates = Array.from(new Set([...SUPPORTED_LANGUAGES, ...localLanguages]));
+  const hit = candidates.find((c) => toPathSlug(c) === target);
+  if (hit) return hit;
+
+  return titleCaseLabel(decodePathLabel(slug));
+}
+
+function resolveGenreFromSlug(slug) {
+  const target = toPathSlug(slug);
+  if (!target) return '';
+
+  const genres = db
+    .prepare(
+      `
+      SELECT mg.genre as genre
+      FROM movie_genres mg
+      JOIN movies m ON m.id = mg.movie_id
+      WHERE COALESCE(m.is_indian, 1) = 1
+      GROUP BY mg.genre
+      ORDER BY COUNT(*) DESC, mg.genre ASC
+      LIMIT 400
+    `
+    )
+    .all()
+    .map((r) => String(r.genre || '').trim())
+    .filter(Boolean);
+  const hit = genres.find((g) => toPathSlug(g) === target);
+  if (hit) return hit;
+
+  return titleCaseLabel(decodePathLabel(slug));
+}
+
+function seoMovieRows({ lang = '', genre = '', limit = 24 } = {}) {
+  const safeLang = String(lang || '').trim();
+  const safeGenre = String(genre || '').trim();
+  const safeLimit = Math.max(1, Math.min(120, Number(limit) || 24));
+
+  return db
+    .prepare(
+      `
+      SELECT DISTINCT
+        m.id as id,
+        m.tmdb_id as tmdb_id,
+        m.title as title,
+        m.language as language,
+        m.release_date as release_date,
+        m.synopsis as synopsis
+      FROM movies m
+      LEFT JOIN movie_genres mg ON mg.movie_id = m.id
+      WHERE COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(m.language) = lower(?))
+        AND (? = '' OR lower(mg.genre) = lower(?))
+      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
+      LIMIT ?
+    `
+    )
+    .all(safeLang, safeLang, safeGenre, safeGenre, safeLimit);
+}
+
+function seoPeopleRows(limit = 60) {
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 60));
+  return db
+    .prepare(
+      `
+      SELECT
+        p.id as id,
+        p.tmdb_id as tmdb_id,
+        p.name as name,
+        p.profile_image as profile_image,
+        COUNT(DISTINCT mc.movie_id) as film_count
+      FROM persons p
+      LEFT JOIN movie_cast mc ON mc.person_id = p.id
+      LEFT JOIN movies m ON m.id = mc.movie_id
+      WHERE p.tmdb_id IS NOT NULL
+        AND COALESCE(m.is_indian, 1) = 1
+      GROUP BY p.id
+      HAVING COUNT(DISTINCT m.id) > 0
+      ORDER BY film_count DESC, p.name ASC
+      LIMIT ?
+    `
+    )
+    .all(safeLimit);
+}
+
 async function seoForPath(req, canonical, siteUrl) {
   const defaultTitle = 'IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers';
   const defaultDesc =
@@ -391,6 +519,416 @@ async function seoForPath(req, canonical, siteUrl) {
     path.startsWith('/account') ||
     path.startsWith('/login') ||
     path.startsWith('/submit');
+
+  const moviePath = (m) =>
+    m?.tmdb_id
+      ? `/movie/${encodeURIComponent(String(m.tmdb_id))}`
+      : `/movie/${encodeURIComponent(String(m?.id || ''))}`;
+  const movieYear = (m) => (/^\d{4}-\d{2}-\d{2}$/.test(String(m?.release_date || '')) ? String(m.release_date).slice(0, 4) : '');
+  const movieListHtml = (rows, emptyText = 'No titles available yet.') => {
+    if (!rows.length) return `<div class="tagline">${escapeHtml(emptyText)}</div>`;
+    return (
+      `<ul style="margin:0;padding-left:18px;">` +
+      rows
+        .slice(0, 40)
+        .map((m) => {
+          const href = moviePath(m);
+          const y = movieYear(m);
+          const lang = String(m?.language || '').trim();
+          const extra = [y ? `(${escapeHtml(y)})` : '', lang ? escapeHtml(lang) : ''].filter(Boolean).join(' · ');
+          return `<li style="margin:0 0 4px;"><a href="${escapeAttr(href)}">${escapeHtml(String(m?.title || 'Untitled'))}</a>${extra ? ` <span style="color:#94a3b8;">${extra}</span>` : ''}</li>`;
+        })
+        .join('') +
+      `</ul>`
+    );
+  };
+  const movieItemList = (rows) =>
+    rows.slice(0, 24).map((m, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      item: {
+        '@type': 'Movie',
+        name: String(m?.title || ''),
+        url: `${siteUrl}${moviePath(m)}`,
+        datePublished: String(m?.release_date || '') || undefined,
+        inLanguage: String(m?.language || '') || undefined
+      }
+    }));
+
+  if (path === '/') {
+    const today = new Date().toISOString().slice(0, 10);
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const newRows = db
+      .prepare(
+        `
+        SELECT id, tmdb_id, title, language, release_date, synopsis
+        FROM movies
+        WHERE release_date BETWEEN ? AND ?
+          AND COALESCE(is_indian, 1) = 1
+        ORDER BY release_date DESC, title ASC
+        LIMIT 12
+      `
+      )
+      .all(sixtyDaysAgo, today);
+    const upcomingRows = db
+      .prepare(
+        `
+        SELECT id, tmdb_id, title, language, release_date, synopsis
+        FROM movies
+        WHERE release_date > ?
+          AND COALESCE(is_indian, 1) = 1
+        ORDER BY release_date ASC, title ASC
+        LIMIT 12
+      `
+      )
+      .all(today);
+    const fallbackRows = newRows.length ? [] : seoMovieRows({ limit: 12 });
+    const topGenres = db
+      .prepare(
+        `
+        SELECT mg.genre as genre, COUNT(*) as c
+        FROM movie_genres mg
+        JOIN movies m ON m.id = mg.movie_id
+        WHERE COALESCE(m.is_indian, 1) = 1
+        GROUP BY mg.genre
+        ORDER BY c DESC, mg.genre ASC
+        LIMIT 12
+      `
+      )
+      .all();
+    const topLanguages = db
+      .prepare(
+        `
+        SELECT language, COUNT(*) as c
+        FROM movies
+        WHERE COALESCE(is_indian, 1) = 1
+          AND COALESCE(language, '') != ''
+        GROUP BY language
+        ORDER BY c DESC, language ASC
+        LIMIT 10
+      `
+      )
+      .all()
+      .filter((l) => {
+        const label = String(l?.language || '').trim();
+        if (!label) return false;
+        const count = Number(l?.c || 0) || 0;
+        if (SUPPORTED_LANGUAGES.some((x) => x.toLowerCase() === label.toLowerCase())) return true;
+        return count >= 10 && label.length > 2 && /^[a-z\s]+$/i.test(label);
+      });
+
+    const effectiveNewRows = newRows.length ? newRows : fallbackRows;
+    const homePre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">Discover Indian Movies</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">Browse new and upcoming releases, cast profiles, streaming links, trailers, songs, and reviews.</p>` +
+      `<section aria-label="New releases" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">New Releases</h2>${movieListHtml(effectiveNewRows, 'New releases are being refreshed.')}</section>` +
+      `<section aria-label="Upcoming releases" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">Upcoming</h2>${movieListHtml(upcomingRows, 'Upcoming releases are being refreshed.')}</section>` +
+      `<section aria-label="Browse by language" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">Browse by Language</h2>` +
+      (topLanguages.length
+        ? `<ul style="margin:0;padding-left:18px;">` +
+          topLanguages
+            .map((l) => {
+              const label = String(l.language || '').trim();
+              if (!label) return '';
+              return `<li style="margin:0 0 4px;"><a href="${escapeAttr(`/language/${encodeURIComponent(toPathSlug(label))}`)}">${escapeHtml(label)}</a> <span style="color:#94a3b8;">(${Number(l.c || 0) || 0})</span></li>`;
+            })
+            .filter(Boolean)
+            .join('') +
+          `</ul>`
+        : `<div class="tagline">No language data available yet.</div>`) +
+      `</section>` +
+      `<section aria-label="Browse by genre" style="margin-top:12px;"><h2 style="margin:0 0 8px;font-size:18px;">Browse by Genre</h2>` +
+      (topGenres.length
+        ? `<ul style="margin:0;padding-left:18px;">` +
+          topGenres
+            .map((g) => {
+              const label = String(g.genre || '').trim();
+              if (!label) return '';
+              return `<li style="margin:0 0 4px;"><a href="${escapeAttr(`/genre/${encodeURIComponent(toPathSlug(label))}`)}">${escapeHtml(label)}</a> <span style="color:#94a3b8;">(${Number(g.c || 0) || 0})</span></li>`;
+            })
+            .filter(Boolean)
+            .join('') +
+          `</ul>`
+        : `<div class="tagline">No genre data available yet.</div>`) +
+      `</section>` +
+      `<p style="margin:12px 0 0;"><a href="/movies">Browse all movies</a> · <a href="/people">Browse people</a></p>` +
+      `</div>`;
+
+    const homeJson = JSON.stringify(
+      {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'CollectionPage',
+            name: 'IndiaMovieGuide Home',
+            url: canonical,
+            description: defaultDesc
+          },
+          {
+            '@type': 'ItemList',
+            name: 'New Indian releases',
+            itemListElement: movieItemList(effectiveNewRows)
+          },
+          {
+            '@type': 'ItemList',
+            name: 'Upcoming Indian releases',
+            itemListElement: movieItemList(upcomingRows)
+          }
+        ]
+      },
+      null,
+      0
+    );
+
+    return {
+      title: defaultTitle,
+      description: defaultDesc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: homeJson,
+      prerender: homePre
+    };
+  }
+
+  if (path === '/movies') {
+    const rows = seoMovieRows({ limit: 80 });
+    const total = Number(
+      db.prepare('SELECT COUNT(*) as c FROM movies WHERE COALESCE(is_indian, 1) = 1').get()?.c || 0
+    );
+    const desc = 'Browse the IndiaMovieGuide movie index across Indian cinema languages and genres.';
+    const pre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">Movie Index</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+      `<p style="margin:0 0 10px;"><a href="/language/hindi">Hindi</a> · <a href="/language/telugu">Telugu</a> · <a href="/language/tamil">Tamil</a> · <a href="/genre/action">Action</a> · <a href="/genre/drama">Drama</a></p>` +
+      movieListHtml(rows) +
+      `</div>`;
+    const json = JSON.stringify(
+      {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'CollectionPage',
+            name: 'IndiaMovieGuide Movie Index',
+            url: canonical,
+            description: desc,
+            numberOfItems: total
+          },
+          {
+            '@type': 'ItemList',
+            name: 'Indian movies',
+            itemListElement: movieItemList(rows)
+          }
+        ]
+      },
+      null,
+      0
+    );
+    return {
+      title: `Movie Index (${total}) · IndiaMovieGuide`,
+      description: desc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: json,
+      prerender: pre
+    };
+  }
+
+  if (path === '/people') {
+    const rows = seoPeopleRows(80);
+    const total = Number(
+      db
+        .prepare(
+          `
+          SELECT COUNT(*) as c
+          FROM (
+            SELECT p.id
+            FROM persons p
+            LEFT JOIN movie_cast mc ON mc.person_id = p.id
+            LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian, 1) = 1
+            WHERE p.tmdb_id IS NOT NULL
+            GROUP BY p.id
+            HAVING COUNT(DISTINCT m.id) > 0
+          ) x
+        `
+        )
+        .get()?.c || 0
+    );
+    const peopleListHtml =
+      rows.length === 0
+        ? `<div class="tagline">No people indexed yet.</div>`
+        : `<ul style="margin:0;padding-left:18px;">` +
+          rows
+            .map((p) => {
+              const href = `/person/${encodeURIComponent(String(p.tmdb_id || p.id || ''))}`;
+              const suffix = Number(p.film_count || 0) > 0 ? ` <span style="color:#94a3b8;">(${Number(p.film_count || 0)} titles)</span>` : '';
+              return `<li style="margin:0 0 4px;"><a href="${escapeAttr(href)}">${escapeHtml(String(p.name || 'Unknown'))}</a>${suffix}</li>`;
+            })
+            .join('') +
+          `</ul>`;
+    const desc = 'Browse actor and filmmaker profiles with filmographies on IndiaMovieGuide.';
+    const pre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">People Index</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+      peopleListHtml +
+      `</div>`;
+    const json = JSON.stringify(
+      {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'CollectionPage',
+            name: 'IndiaMovieGuide People Index',
+            url: canonical,
+            description: desc,
+            numberOfItems: total
+          },
+          {
+            '@type': 'ItemList',
+            name: 'People',
+            itemListElement: rows.slice(0, 24).map((p, i) => ({
+              '@type': 'ListItem',
+              position: i + 1,
+              item: {
+                '@type': 'Person',
+                name: String(p.name || ''),
+                url: `${siteUrl}/person/${encodeURIComponent(String(p.tmdb_id || p.id || ''))}`
+              }
+            }))
+          }
+        ]
+      },
+      null,
+      0
+    );
+    return {
+      title: `People Index (${total}) · IndiaMovieGuide`,
+      description: desc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: json,
+      prerender: pre
+    };
+  }
+
+  const languageMatch = path.match(/^\/language\/([^/]+)$/);
+  if (languageMatch) {
+    const language = resolveLanguageFromSlug(languageMatch[1]);
+    const rows = seoMovieRows({ lang: language, limit: 80 });
+    const total = Number(
+      db
+        .prepare(
+          `
+          SELECT COUNT(*) as c
+          FROM movies
+          WHERE COALESCE(is_indian, 1) = 1
+            AND (? = '' OR lower(language) = lower(?))
+        `
+        )
+        .get(language, language)?.c || 0
+    );
+    const desc = `Browse ${language} movies on IndiaMovieGuide.`;
+    const pre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(language)} Movies</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+      `<p style="margin:0 0 10px;"><a href="/movies">All movies</a></p>` +
+      movieListHtml(rows, `No ${language} titles available yet.`) +
+      `</div>`;
+    const json = JSON.stringify(
+      {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'CollectionPage',
+            name: `${language} movies`,
+            url: canonical,
+            description: desc,
+            inLanguage: language,
+            numberOfItems: total
+          },
+          {
+            '@type': 'ItemList',
+            name: `${language} movie list`,
+            itemListElement: movieItemList(rows)
+          }
+        ]
+      },
+      null,
+      0
+    );
+    return {
+      title: `${language} Movies (${total}) · IndiaMovieGuide`,
+      description: desc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: json,
+      prerender: pre
+    };
+  }
+
+  const genreMatch = path.match(/^\/genre\/([^/]+)$/);
+  if (genreMatch) {
+    const genre = resolveGenreFromSlug(genreMatch[1]);
+    const rows = seoMovieRows({ genre, limit: 80 });
+    const total = Number(
+      db
+        .prepare(
+          `
+          SELECT COUNT(DISTINCT m.id) as c
+          FROM movies m
+          JOIN movie_genres mg ON mg.movie_id = m.id
+          WHERE COALESCE(m.is_indian, 1) = 1
+            AND (? = '' OR lower(mg.genre) = lower(?))
+        `
+        )
+        .get(genre, genre)?.c || 0
+    );
+    const desc = `Browse ${genre} movies on IndiaMovieGuide.`;
+    const pre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(genre)} Movies</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+      `<p style="margin:0 0 10px;"><a href="/movies">All movies</a></p>` +
+      movieListHtml(rows, `No ${genre} titles available yet.`) +
+      `</div>`;
+    const json = JSON.stringify(
+      {
+        '@context': 'https://schema.org',
+        '@graph': [
+          {
+            '@type': 'CollectionPage',
+            name: `${genre} movies`,
+            url: canonical,
+            description: desc,
+            numberOfItems: total
+          },
+          {
+            '@type': 'ItemList',
+            name: `${genre} movie list`,
+            itemListElement: movieItemList(rows)
+          }
+        ]
+      },
+      null,
+      0
+    );
+    return {
+      title: `${genre} Movies (${total}) · IndiaMovieGuide`,
+      description: desc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: json,
+      prerender: pre
+    };
+  }
 
   // Movie page
   const movieMatch = path.match(/^\/movie\/([^/]+)$/);
@@ -4476,11 +5014,85 @@ app.get('/api/categories', (_req, res) => {
   });
 });
 
+app.get('/api/people', async (req, res) => {
+  await seedIfEmpty();
+
+  const q = String(req.query.q || '').trim();
+  const page = Math.max(1, Math.min(500, Number(req.query.page || 1) || 1));
+  const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 48;
+  const pageSize = Math.max(1, Math.min(100, Number(pageSizeRaw) || 48));
+  const offset = (page - 1) * pageSize;
+  const needle = q ? `%${q.toLowerCase()}%` : '';
+
+  const total = Number(
+    db
+      .prepare(
+        `
+        SELECT COUNT(*) as c
+        FROM (
+          SELECT p.id
+          FROM persons p
+          LEFT JOIN movie_cast mc ON mc.person_id = p.id
+          LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian, 1) = 1
+          WHERE p.tmdb_id IS NOT NULL
+            AND (? = '' OR lower(p.name) LIKE ?)
+          GROUP BY p.id
+          HAVING COUNT(DISTINCT m.id) > 0
+        ) x
+      `
+      )
+      .get(q, needle)?.c || 0
+  );
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        p.id as id,
+        p.tmdb_id as tmdbId,
+        p.name as name,
+        p.profile_image as profileImage,
+        COUNT(DISTINCT m.id) as filmCount,
+        MAX(COALESCE(m.release_date, '0000-00-00')) as latestRelease
+      FROM persons p
+      LEFT JOIN movie_cast mc ON mc.person_id = p.id
+      LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian, 1) = 1
+      WHERE p.tmdb_id IS NOT NULL
+        AND (? = '' OR lower(p.name) LIKE ?)
+      GROUP BY p.id
+      HAVING COUNT(DISTINCT m.id) > 0
+      ORDER BY filmCount DESC, latestRelease DESC, p.name ASC
+      LIMIT ? OFFSET ?
+    `
+    )
+    .all(q, needle, pageSize, offset);
+
+  res.json({
+    generatedAt: nowIso(),
+    people: rows.map((r) => ({
+      id: r.id,
+      tmdbId: r.tmdbId || null,
+      name: r.name || '',
+      profileImage: r.profileImage || '',
+      filmCount: Number(r.filmCount || 0) || 0
+    })),
+    page,
+    pageSize,
+    total,
+    hasMore: offset + rows.length < total,
+    q: q || null
+  });
+});
+
 app.get('/api/browse', async (req, res) => {
   await seedIfEmpty();
 
-  const lang = String(req.query.lang || '').trim();
-  const genre = String(req.query.genre || '').trim();
+  let lang = String(req.query.lang || '').trim();
+  let genre = String(req.query.genre || '').trim();
+  const langSlug = String(req.query.langSlug || '').trim();
+  const genreSlug = String(req.query.genreSlug || '').trim();
+  if (!lang && langSlug) lang = resolveLanguageFromSlug(langSlug);
+  if (!genre && genreSlug) genre = resolveGenreFromSlug(genreSlug);
   const page = Math.max(1, Math.min(500, Number(req.query.page || 1) || 1));
   const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 60;
   const pageSize = Math.max(1, Math.min(80, Number(pageSizeRaw) || 60));
@@ -4690,11 +5302,69 @@ app.get('/sitemap.xml', (req, res) => {
   const maxUrls = Math.max(200, Math.min(50000, Number(process.env.SITEMAP_MAX_URLS || 0) || 2000));
   const movieLimit = Math.max(100, Math.floor(maxUrls * 0.8));
   const personLimit = Math.max(50, Math.floor(maxUrls * 0.2));
+  const languageLimit = Math.max(6, Math.min(40, Number(process.env.SITEMAP_LANG_LIMIT || 0) || 12));
+  const genreLimit = Math.max(6, Math.min(80, Number(process.env.SITEMAP_GENRE_LIMIT || 0) || 24));
 
-  const staticPaths = ['/', '/about', '/contact', '/feedback', '/privacy'];
+  const staticPaths = ['/', '/movies', '/people', '/about', '/contact', '/feedback', '/privacy'];
   const urls = [];
   for (const p of staticPaths) {
     urls.push({ loc: `${base}${p === '/' ? '/' : p}`, lastmod: null, priority: p === '/' ? '1.0' : '0.6' });
+  }
+
+  const languages = db
+    .prepare(
+      `
+      SELECT language, COUNT(*) as c
+      FROM movies
+      WHERE COALESCE(is_indian, 1) = 1
+        AND COALESCE(language, '') != ''
+      GROUP BY language
+      ORDER BY c DESC, language ASC
+      LIMIT ?
+    `
+    )
+    .all(languageLimit * 3)
+    .filter((l) => {
+      const label = String(l?.language || '').trim();
+      if (!label) return false;
+      const count = Number(l?.c || 0) || 0;
+      if (SUPPORTED_LANGUAGES.some((x) => x.toLowerCase() === label.toLowerCase())) return true;
+      return count >= 10 && label.length > 2 && /^[a-z\s]+$/i.test(label);
+    })
+    .slice(0, languageLimit);
+  for (const l of languages) {
+    const language = String(l?.language || '').trim();
+    const slug = toPathSlug(language);
+    if (!language || !slug) continue;
+    urls.push({
+      loc: `${base}/language/${encodeURIComponent(slug)}`,
+      lastmod: null,
+      priority: '0.7'
+    });
+  }
+
+  const genres = db
+    .prepare(
+      `
+      SELECT mg.genre as genre, COUNT(*) as c
+      FROM movie_genres mg
+      JOIN movies m ON m.id = mg.movie_id
+      WHERE COALESCE(m.is_indian, 1) = 1
+      GROUP BY mg.genre
+      ORDER BY c DESC, mg.genre ASC
+      LIMIT ?
+    `
+    )
+    .all(genreLimit);
+  for (const g of genres) {
+    const genre = String(g?.genre || '').trim();
+    const slug = toPathSlug(genre);
+    if (!genre || !slug) continue;
+    urls.push({
+      loc: `${base}/genre/${encodeURIComponent(slug)}`,
+      lastmod: null,
+      priority: '0.7'
+    });
   }
 
   const movies = db

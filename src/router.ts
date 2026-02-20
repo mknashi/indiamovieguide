@@ -3,6 +3,10 @@ import type { MouseEvent } from 'react';
 export type Route =
   | { name: 'home'; lang?: string; refresh?: boolean }
   | { name: 'streaming'; lang?: string; provider?: string }
+  | { name: 'movies' }
+  | { name: 'people' }
+  | { name: 'language'; slug: string }
+  | { name: 'genre'; slug: string }
   | { name: 'search'; q: string }
   | { name: 'movie'; id: string }
   | { name: 'movie_reviews'; id: string }
@@ -33,6 +37,8 @@ export function parseRoute(loc: Location = window.location): Route {
     const provider = params.get('provider') || undefined;
     return { name: 'streaming', ...(lang ? { lang } : {}), ...(provider ? { provider } : {}) };
   }
+  if (path === '/movies') return { name: 'movies' };
+  if (path === '/people') return { name: 'people' };
   if (path === '/search') {
     return { name: 'search', q: params.get('q') || '' };
   }
@@ -52,6 +58,8 @@ export function parseRoute(loc: Location = window.location): Route {
   if (parts[0] === 'movie' && parts[1] && parts[2] === 'reviews') {
     return { name: 'movie_reviews', id: decodeURIComponent(parts[1]) };
   }
+  if (parts[0] === 'language' && parts[1]) return { name: 'language', slug: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'genre' && parts[1]) return { name: 'genre', slug: decodeURIComponent(parts[1]) };
   if (parts[0] === 'movie' && parts[1]) return { name: 'movie', id: decodeURIComponent(parts[1]) };
   if (parts[0] === 'person' && parts[1]) return { name: 'person', id: decodeURIComponent(parts[1]) };
   if (parts[0] === 'trailer' && parts[1]) return { name: 'trailer', id: decodeURIComponent(parts[1]) };
