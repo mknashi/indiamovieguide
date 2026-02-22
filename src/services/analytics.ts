@@ -105,6 +105,8 @@ export function trackPageView(path = `${window.location.pathname}${window.locati
 
   lastTrackedPath = path;
   const payload = {
+    send_to: GA_MEASUREMENT_ID,
+    debug_mode: isAnalyticsDebugEnabled(),
     page_location: window.location.href,
     page_path: path,
     page_title: document.title
