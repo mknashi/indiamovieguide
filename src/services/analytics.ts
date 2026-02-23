@@ -6,7 +6,7 @@ let lastTrackedPath: string | null = null;
 
 declare global {
   interface Window {
-    dataLayer?: unknown[][];
+    dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
   }
 }
@@ -79,13 +79,18 @@ export function initAnalytics(): void {
 
   ensureGtagScript();
   window.dataLayer = window.dataLayer || [];
-  window.gtag = (...args: unknown[]) => {
-    window.dataLayer?.push(args);
+  // Use the canonical gtag shim shape so gtag.js can drain queued calls reliably.
+  window.gtag = function gtagShim(..._args: unknown[]) {
+    window.dataLayer?.push(arguments);
   };
   window.gtag('js', new Date());
   window.gtag('config', GA_MEASUREMENT_ID, { send_page_view: false });
   analyticsInitialized = true;
-  debugLog('Analytics initialized', { measurementId: GA_MEASUREMENT_ID, sendPageView: false });
+  debugLog('Analytics initialized', {
+    measurementId: GA_MEASUREMENT_ID,
+    sendPageView: false,
+    queueLength: window.dataLayer.length
+  });
 }
 
 export function trackPageView(path = `${window.location.pathname}${window.location.search}`): void {
@@ -109,7 +114,9 @@ export function trackPageView(path = `${window.location.pathname}${window.locati
     debug_mode: isAnalyticsDebugEnabled(),
     page_location: window.location.href,
     page_path: path,
-    page_title: document.title
+    page_title: document.title,
+    event_callback: () => debugLog('page_view callback fired', { path }),
+    event_timeout: 2000
   };
   debugLog('Sending page_view', { measurementId: GA_MEASUREMENT_ID, payload });
   window.gtag?.('event', 'page_view', payload);
