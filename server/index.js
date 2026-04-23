@@ -3419,7 +3419,10 @@ app.get('/api/spotlight', async (_req, res) => {
       try {
         const hits = await tmdbSearchPerson(name);
         const hit = hits?.[0];
-        if (!hit?.tmdbId) continue;
+        if (!hit?.tmdbId) {
+          console.warn(`[spotlight] TMDB returned no results for "${name}"`);
+          continue;
+        }
 
         const personId = makeId('tmdb-person', hit.tmdbId);
         const ts = nowIso();
@@ -3447,8 +3450,18 @@ app.get('/api/spotlight', async (_req, res) => {
         );
 
         persons.push({ tmdbId: hit.tmdbId, name: hit.name, profileImage: hit.profileImage });
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error(`[spotlight] TMDB fetch failed for "${name}":`, err.message);
+        // Fallback: use cached record from local DB if available
+        const cached = db.prepare(
+          `SELECT tmdb_id, name, profile_image FROM persons WHERE name = ? AND profile_image != '' LIMIT 1`
+        ).get(name);
+        if (cached) {
+          console.log(`[spotlight] Using cached DB record for "${name}"`);
+          persons.push({ tmdbId: cached.tmdb_id, name: cached.name, profileImage: cached.profile_image });
+        } else {
+          console.warn(`[spotlight] No cached record found for "${name}", skipping`);
+        }
       }
     }
     groups.push({ language, persons });
