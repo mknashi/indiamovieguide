@@ -582,6 +582,128 @@ export function hydrateMovie(db, movieId) {
   };
 }
 
+// Batch hydration for browse/list views. Runs 6 queries for any number of movies
+// instead of 9 queries per movie. Omits reviews and attributions (not shown on cards).
+export function hydrateMoviesForBrowse(db, ids) {
+  if (!ids.length) return [];
+  const ph = ids.map(() => '?').join(',');
+
+  const movies = db
+    .prepare(`SELECT id, title, language, synopsis, release_date, status, poster, backdrop, director FROM movies WHERE id IN (${ph})`)
+    .all(...ids);
+
+  const genreRows = db
+    .prepare(`SELECT movie_id, genre FROM movie_genres WHERE movie_id IN (${ph})`)
+    .all(...ids);
+
+  const castRows = db
+    .prepare(
+      `SELECT mc.movie_id, p.id as person_id, p.tmdb_id, p.name
+       FROM movie_cast mc
+       JOIN persons p ON p.id = mc.person_id
+       WHERE mc.movie_id IN (${ph})
+       ORDER BY mc.movie_id, mc.billing_order ASC`
+    )
+    .all(...ids);
+
+  const ottRows = db
+    .prepare(
+      `SELECT movie_id, provider, offer_type, url, deep_link, logo, region, created_at
+       FROM ott_offers WHERE movie_id IN (${ph}) ORDER BY movie_id, provider ASC`
+    )
+    .all(...ids);
+
+  const ratingRows = db
+    .prepare(
+      `SELECT movie_id, source, value, scale FROM ratings
+       WHERE movie_id IN (${ph}) AND source IN ('imdb', 'tmdb')`
+    )
+    .all(...ids);
+
+  const songRows = db
+    .prepare(
+      `SELECT movie_id, id, title, singers_json, youtube_url
+       FROM songs WHERE movie_id IN (${ph}) ORDER BY movie_id, created_at DESC`
+    )
+    .all(...ids);
+
+  // Group all related rows by movie_id.
+  const genresByMovie = Object.create(null);
+  for (const r of genreRows) (genresByMovie[r.movie_id] ??= []).push(r.genre);
+
+  const castByMovie = Object.create(null);
+  for (const r of castRows) {
+    const arr = (castByMovie[r.movie_id] ??= []);
+    if (arr.length < 4)
+      arr.push({ personId: r.person_id, name: r.name, role: 'Actor', character: '', tmdbId: r.tmdb_id || undefined });
+  }
+
+  const ottByMovie = Object.create(null);
+  for (const r of ottRows) {
+    const entry = (ottByMovie[r.movie_id] ??= { offers: [], lastVerifiedAt: '' });
+    if (r.created_at > entry.lastVerifiedAt) entry.lastVerifiedAt = r.created_at;
+    entry.offers.push({
+      provider: r.provider,
+      type: r.offer_type,
+      url: r.url || undefined,
+      deepLink: r.deep_link || undefined,
+      logo: r.logo || undefined,
+      region: r.region || undefined
+    });
+  }
+
+  const ratingsByMovie = Object.create(null);
+  for (const r of ratingRows) (ratingsByMovie[r.movie_id] ??= []).push(r);
+
+  const songsByMovie = Object.create(null);
+  for (const r of songRows) {
+    const arr = (songsByMovie[r.movie_id] ??= []);
+    if (arr.length < 20)
+      arr.push({ id: r.id, title: r.title, singers: JSON.parse(r.singers_json || '[]'), youtubeUrl: r.youtube_url || undefined });
+  }
+
+  const movieById = Object.create(null);
+  for (const m of movies) movieById[m.id] = m;
+
+  return ids.map((id) => {
+    const m = movieById[id];
+    if (!m) return null;
+
+    const ratings = ratingsByMovie[id] || [];
+    const primaryRating = (() => {
+      const imdb = ratings.find((r) => r.source === 'imdb' && r.scale === 10);
+      if (imdb) return imdb.value;
+      return ratings.find((r) => r.source === 'tmdb' && r.scale === 10)?.value;
+    })();
+
+    const ottEntry = ottByMovie[id] || { offers: [], lastVerifiedAt: '' };
+
+    return {
+      id: m.id,
+      title: m.title,
+      language: m.language || 'Hindi',
+      synopsis: m.synopsis || '',
+      cast: castByMovie[id] || [],
+      director: m.director || 'TBD',
+      writers: [],
+      genres: genresByMovie[id] || [],
+      themes: [],
+      releaseDate: m.release_date || undefined,
+      status: m.status || 'Announced',
+      poster: m.poster || '',
+      backdrop: m.backdrop || undefined,
+      rating: typeof primaryRating === 'number' ? primaryRating : undefined,
+      trailerUrl: undefined,
+      ott: ottEntry.offers,
+      ottLastVerifiedAt: ottEntry.lastVerifiedAt || undefined,
+      songs: songsByMovie[id] || [],
+      ratings: [],
+      reviews: [],
+      sources: []
+    };
+  }).filter(Boolean);
+}
+
 export function hydratePerson(db, personId) {
   const p = db.prepare('SELECT * FROM persons WHERE id = ?').get(personId);
   if (!p) return null;

@@ -321,6 +321,10 @@ export function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_soundex ON movies(title_soundex)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_norm ON movies(title_norm)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_persons_name_soundex ON persons(name_soundex)');
+  // Expression indexes so browse WHERE/ORDER BY clauses can use indexes.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_lower ON movies(lower(language))');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_release ON movies(lower(language), release_date DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_movie_genres_genre_lower ON movie_genres(lower(genre))');
 
   // Backfill for existing rows so filtering and "sounds-like" search work immediately.
   try {

@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { openDb, migrate, resolveDbPath } from './db/sqlite.js';
 import {
   hydrateMovie,
+  hydrateMoviesForBrowse,
   hydratePerson,
   searchLocal,
   upsertMovieFromTmdb,
@@ -5178,7 +5179,7 @@ app.get('/api/browse', async (req, res) => {
 
   res.json({
     generatedAt: nowIso(),
-    movies: ids.map((id) => hydrateMovie(db, id)).filter(Boolean),
+    movies: hydrateMoviesForBrowse(db, ids),
     page,
     pageSize,
     total,
