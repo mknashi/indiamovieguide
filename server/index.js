@@ -5493,6 +5493,52 @@ if (fs.existsSync(DIST_DIR)) {
   });
 }
 
+// Prune stale data on startup to keep the DB from growing unboundedly.
+// Runs fast targeted DELETEs — does not block startup.
+function pruneStaleData() {
+  try {
+    const now = Date.now();
+    const nowIsoStr = new Date().toISOString();
+
+    // 1. Expired api_cache entries (YouTube, Wikipedia, etc.)
+    const cacheDeleted = db.prepare('DELETE FROM api_cache WHERE expires_at < ?').run(now).changes;
+
+    // 2. Expired user sessions and password reset tokens
+    const sessDeleted = db.prepare('DELETE FROM user_sessions WHERE expires_at < ?').run(nowIsoStr).changes;
+    const resetDeleted = db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(nowIsoStr).changes;
+
+    // 3. Orphaned app_meta song/ott attempt keys for movies that no longer exist.
+    //    Keys follow the pattern "last_*_at:<movie-id>".
+    const metaDeleted = db.prepare(`
+      DELETE FROM app_meta
+      WHERE key LIKE 'last_song_%:%' OR key LIKE 'last_ott_%:%'
+      AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM movies)
+    `).run().changes;
+
+    console.log(
+      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows`
+    );
+  } catch (err) {
+    console.error('[startup] pruneStaleData error:', err.message);
+  }
+}
+
+pruneStaleData();
+
+app.post('/api/admin/db-vacuum', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  try {
+    const before = db.prepare('PRAGMA page_count').get().page_count * db.prepare('PRAGMA page_size').get().page_size;
+    db.exec('VACUUM');
+    const after = db.prepare('PRAGMA page_count').get().page_count * db.prepare('PRAGMA page_size').get().page_size;
+    const freedMB = ((before - after) / 1024 / 1024).toFixed(2);
+    res.json({ ok: true, beforeBytes: before, afterBytes: after, freedMB: Number(freedMB) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Default to localhost for dev; bind to all interfaces in production hosting.
 const HOST = String(process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'));
 app.listen(PORT, HOST, () => {
