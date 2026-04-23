@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: indiamovieguide
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/indiamovieguide.sqlite
+      - key: SITE_URL
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: sqlite-data
+      mountPath: /var/data
+      sizeGB: 2

@@ -5497,26 +5497,39 @@ if (fs.existsSync(DIST_DIR)) {
 // Runs fast targeted DELETEs — does not block startup.
 function pruneStaleData() {
   try {
-    const now = Date.now();
     const nowIsoStr = new Date().toISOString();
 
-    // 1. Expired api_cache entries (YouTube, Wikipedia, etc.)
-    const cacheDeleted = db.prepare('DELETE FROM api_cache WHERE expires_at < ?').run(now).changes;
+    // 1. Truncate the WAL file — can free hundreds of MB with no extra disk needed.
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
 
-    // 2. Expired user sessions and password reset tokens
+    // 2. All api_cache entries (YouTube, Wikipedia). They re-warm on next request.
+    //    Clearing all (not just expired) is the safest way to reclaim space fast.
+    const cacheDeleted = db.prepare('DELETE FROM api_cache').run().changes;
+
+    // 3. production_countries_json is only used to compute is_indian at ingest time.
+    //    is_indian is already stored on each movie row so this blob is redundant.
+    db.prepare('UPDATE movies SET production_countries_json = NULL WHERE production_countries_json IS NOT NULL').run();
+
+    // 4. filmography_json on persons is re-fetched from TMDB on each person page visit.
+    db.prepare('UPDATE persons SET filmography_json = NULL WHERE filmography_json IS NOT NULL').run();
+
+    // 5. Expired user sessions and password reset tokens
     const sessDeleted = db.prepare('DELETE FROM user_sessions WHERE expires_at < ?').run(nowIsoStr).changes;
     const resetDeleted = db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(nowIsoStr).changes;
 
-    // 3. Orphaned app_meta song/ott attempt keys for movies that no longer exist.
-    //    Keys follow the pattern "last_*_at:<movie-id>".
+    // 6. Orphaned app_meta song/ott attempt keys for movies that no longer exist.
     const metaDeleted = db.prepare(`
       DELETE FROM app_meta
-      WHERE key LIKE 'last_song_%:%' OR key LIKE 'last_ott_%:%'
-      AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM movies)
+      WHERE (key LIKE 'last_song_%:%' OR key LIKE 'last_ott_%:%')
+        AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM movies)
     `).run().changes;
 
+    const pageSize = db.prepare('PRAGMA page_size').get().page_size;
+    const freePages = db.prepare('PRAGMA freelist_count').get().freelist_count;
+    const freeMB = ((pageSize * freePages) / 1024 / 1024).toFixed(1);
+
     console.log(
-      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows`
+      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows — ${freeMB} MB reclaimable (run VACUUM to return to OS)`
     );
   } catch (err) {
     console.error('[startup] pruneStaleData error:', err.message);
