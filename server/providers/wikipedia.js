@@ -1,3 +1,41 @@
+import crypto from 'node:crypto';
+
+const WIKI_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const WIKI_SOUNDTRACK_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days (track lists update for new releases)
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function sha1(input) {
+  return crypto.createHash('sha1').update(String(input)).digest('hex');
+}
+
+function cacheGet(db, key) {
+  if (!db) return null;
+  try {
+    const row = db.prepare('SELECT value_json, expires_at FROM api_cache WHERE key = ?').get(String(key));
+    const exp = row?.expires_at ? Number(row.expires_at) : 0;
+    if (!exp || Date.now() > exp) return null;
+    return row?.value_json ? JSON.parse(String(row.value_json)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheSet(db, key, value, ttlMs) {
+  if (!db) return;
+  try {
+    const ts = nowIso();
+    const exp = Date.now() + Math.max(1, Number(ttlMs || 0));
+    db.prepare(
+      'INSERT OR REPLACE INTO api_cache(key, value_json, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(String(key), JSON.stringify(value ?? null), exp, ts, ts);
+  } catch {
+    // ignore
+  }
+}
+
 function wikiUrl(title, lang = 'en') {
   const base = wikiApiBase(lang);
   const safe = encodeURIComponent(title.replace(/ /g, '_'));
@@ -132,22 +170,33 @@ function extractTrackTitlesFromHtml(html) {
 }
 
 export async function wikipediaSearch(query, opts = {}) {
-  const base = wikiApiBase(opts.lang);
+  const db = opts.db || null;
+  const lang = String(opts.lang || 'en').trim() || 'en';
+  const limit = opts.limit || 6;
+
+  const cacheKey = `wikisearch:${sha1(`${String(query || '').trim()}|${lang}|${limit}`)}`;
+  const cached = cacheGet(db, cacheKey);
+  if (cached && Array.isArray(cached.results)) return cached.results;
+
+  const base = wikiApiBase(lang);
   const url = new URL(`${base}/w/api.php`);
   url.searchParams.set('action', 'query');
   url.searchParams.set('list', 'search');
   url.searchParams.set('srsearch', query);
   url.searchParams.set('srnamespace', '0'); // articles only
-  url.searchParams.set('srlimit', String(opts.limit || 6));
+  url.searchParams.set('srlimit', String(limit));
   url.searchParams.set('format', 'json');
 
   const res = await fetch(url, { headers: { 'User-Agent': 'indiamovieguide.com (local dev)' } });
   if (!res.ok) throw new Error(`Wikipedia search failed: ${res.status}`);
   const data = await res.json();
-  return (data?.query?.search || []).map((h) => ({
+  const results = (data?.query?.search || []).map((h) => ({
     title: h?.title || '',
     snippet: decodeHtmlEntities(String(h?.snippet || '').replace(/<[^>]+>/g, ' '))
   })).filter((h) => h.title);
+
+  cacheSet(db, cacheKey, { results }, WIKI_TTL_MS);
+  return results;
 }
 
 export async function wikipediaSearchTitle(query, opts = {}) {
@@ -157,7 +206,14 @@ export async function wikipediaSearchTitle(query, opts = {}) {
 
 export async function wikipediaLeadByTitle(title, opts = {}) {
   if (!title) return { title: null, url: null, extract: '' };
-  const base = wikiApiBase(opts.lang);
+  const db = opts.db || null;
+  const lang = String(opts.lang || 'en').trim() || 'en';
+
+  const cacheKey = `wikilead:${sha1(`${String(title).trim()}|${lang}`)}`;
+  const cached = cacheGet(db, cacheKey);
+  if (cached && 'extract' in cached) return cached;
+
+  const base = wikiApiBase(lang);
   const url = new URL(`${base}/w/api.php`);
   url.searchParams.set('action', 'query');
   url.searchParams.set('prop', 'extracts');
@@ -174,12 +230,22 @@ export async function wikipediaLeadByTitle(title, opts = {}) {
   const page = Object.values(pages)[0] || null;
   const pageTitle = page?.title || title;
   const extract = String(page?.extract || '').trim();
-  return { title: pageTitle, url: wikiUrl(pageTitle, opts.lang), extract };
+  const result = { title: pageTitle, url: wikiUrl(pageTitle, lang), extract };
+
+  cacheSet(db, cacheKey, result, WIKI_TTL_MS);
+  return result;
 }
 
 export async function wikipediaSoundtrackTracksByTitle(title, opts = {}) {
   if (!title) return { title: null, url: null, tracks: [] };
-  const base = wikiApiBase(opts.lang);
+  const db = opts.db || null;
+  const lang = String(opts.lang || 'en').trim() || 'en';
+
+  const cacheKey = `wikisoundtrack:${sha1(`${String(title).trim()}|${lang}`)}`;
+  const cached = cacheGet(db, cacheKey);
+  if (cached && Array.isArray(cached.tracks)) return cached;
+
+  const base = wikiApiBase(lang);
 
   const sectionsUrl = new URL(`${base}/w/api.php`);
   sectionsUrl.searchParams.set('action', 'parse');
@@ -208,7 +274,12 @@ export async function wikipediaSoundtrackTracksByTitle(title, opts = {}) {
       return w(a.line) - w(b.line);
     })
     .map((sec) => sec.index);
-  if (!candidates.length) return { title: canonicalTitle, url: wikiUrl(canonicalTitle, opts.lang), tracks: [] };
+
+  if (!candidates.length) {
+    const result = { title: canonicalTitle, url: wikiUrl(canonicalTitle, lang), tracks: [] };
+    cacheSet(db, cacheKey, result, WIKI_SOUNDTRACK_TTL_MS);
+    return result;
+  }
 
   for (const index of candidates) {
     const htmlUrl = new URL(`${base}/w/api.php`);
@@ -223,22 +294,37 @@ export async function wikipediaSoundtrackTracksByTitle(title, opts = {}) {
     const hdata = await hres.json().catch(() => ({}));
     const html = hdata?.parse?.text?.['*'] || '';
     const tracks = extractTrackTitlesFromHtml(html);
-    if (tracks.length >= 2) return { title: canonicalTitle, url: wikiUrl(canonicalTitle, opts.lang), tracks };
+    if (tracks.length >= 2) {
+      const result = { title: canonicalTitle, url: wikiUrl(canonicalTitle, lang), tracks };
+      cacheSet(db, cacheKey, result, WIKI_SOUNDTRACK_TTL_MS);
+      return result;
+    }
   }
 
-  return { title: canonicalTitle, url: wikiUrl(canonicalTitle, opts.lang), tracks: [] };
+  const result = { title: canonicalTitle, url: wikiUrl(canonicalTitle, lang), tracks: [] };
+  cacheSet(db, cacheKey, result, WIKI_SOUNDTRACK_TTL_MS);
+  return result;
 }
 
-export async function wikipediaSummaryByTitle(title) {
+export async function wikipediaSummaryByTitle(title, opts = {}) {
   if (!title) return null;
+  const db = opts.db || null;
+
+  const cacheKey = `wikisummary:${sha1(String(title).trim())}`;
+  const cached = cacheGet(db, cacheKey);
+  if (cached && 'extract' in cached) return cached;
+
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'indiamovieguide.com (local dev)' } });
   if (!res.ok) return null;
   const data = await res.json();
-  return {
+  const result = {
     title: data.title,
     extract: data.extract || '',
     url: data.content_urls?.desktop?.page || wikiUrl(data.title),
     thumbnail: data.thumbnail?.source || ''
   };
+
+  cacheSet(db, cacheKey, result, WIKI_TTL_MS);
+  return result;
 }

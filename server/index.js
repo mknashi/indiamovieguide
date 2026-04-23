@@ -1640,7 +1640,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
 
       const wikiOverride = opts?.wikiTitleOverride ? String(opts.wikiTitleOverride).trim() : '';
       const wikiFromOverride = wikiOverride
-        ? await wikipediaSoundtrackTracksByTitle(wikiOverride, { lang: 'en' }).catch(() => null)
+        ? await wikipediaSoundtrackTracksByTitle(wikiOverride, { lang: 'en', db }).catch(() => null)
         : null;
 
       const wiki =
@@ -1656,7 +1656,7 @@ async function enrichMovieIfNeeded(movieId, opts = {}) {
       if (useWiki) {
         // If the chosen Wikipedia page doesn't match the movie's language/year, don't use it.
         // This prevents ambiguous titles ("Champion") from pulling the wrong film's soundtrack.
-        const lead = await wikipediaLeadByTitle(wiki.title, { lang: 'en' }).catch(() => null);
+        const lead = await wikipediaLeadByTitle(wiki.title, { lang: 'en', db }).catch(() => null);
         const l = normalizeText(lead?.extract || '');
         const langToken = normalizeText(full.language);
         const y = year ? String(year) : '';
@@ -2373,9 +2373,9 @@ async function wikipediaTracklistForMovie({ title, year, language, castNames }) 
           const key = `${wikiLang}:${t}`.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
-          const tl = await wikipediaSoundtrackTracksByTitle(t, { lang: wikiLang }).catch(() => null);
+          const tl = await wikipediaSoundtrackTracksByTitle(t, { lang: wikiLang, db }).catch(() => null);
           if (tl && Array.isArray(tl.tracks) && tl.tracks.length >= 2) {
-            const lead = await wikipediaLeadByTitle(tl.title, { lang: wikiLang }).catch(() => null);
+            const lead = await wikipediaLeadByTitle(tl.title, { lang: wikiLang, db }).catch(() => null);
             const ok = looksLikeSameMovie(lead?.extract || '', tl.title);
             if (ok) return tl;
           }
@@ -2384,7 +2384,7 @@ async function wikipediaTracklistForMovie({ title, year, language, castNames }) 
     }
 
     for (const q of queries) {
-      const hits = await wikipediaSearch(q, { lang: wikiLang, limit: 8 }).catch(() => []);
+      const hits = await wikipediaSearch(q, { lang: wikiLang, limit: 8, db }).catch(() => []);
       const ranked = hits
         .map((h) => ({ ...h, _score: scoreHit(h) }))
         .filter((h) => h._score >= 1.8)
@@ -2395,9 +2395,9 @@ async function wikipediaTracklistForMovie({ title, year, language, castNames }) 
         const key = `${wikiLang}:${h.title}`.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
-        const tl = await wikipediaSoundtrackTracksByTitle(h.title, { lang: wikiLang }).catch(() => null);
+        const tl = await wikipediaSoundtrackTracksByTitle(h.title, { lang: wikiLang, db }).catch(() => null);
         if (tl && Array.isArray(tl.tracks) && tl.tracks.length >= 2) {
-          const lead = await wikipediaLeadByTitle(tl.title, { lang: wikiLang }).catch(() => null);
+          const lead = await wikipediaLeadByTitle(tl.title, { lang: wikiLang, db }).catch(() => null);
           const ok = looksLikeSameMovie(lead?.extract || '', tl.title);
           if (ok) return tl;
         }
@@ -4623,8 +4623,8 @@ app.get('/api/search', async (req, res) => {
   let didYouMean = null;
   if (!movieHits.length) {
     const wikiTitle =
-      (await wikipediaSearchTitle(q).catch(() => null)) ||
-      (await wikipediaSearchTitle(`${q} film`).catch(() => null));
+      (await wikipediaSearchTitle(q, { db }).catch(() => null)) ||
+      (await wikipediaSearchTitle(`${q} film`, { db }).catch(() => null));
     if (wikiTitle && wikiTitle.toLowerCase() !== q.toLowerCase()) {
       const retry = await tmdbSearchMovie(wikiTitle).catch(() => []);
       if (retry.length) {
@@ -4726,8 +4726,8 @@ app.get('/api/search', async (req, res) => {
       `
       ).run(personId, full.tmdbId, full.name, soundex(full.name), full.biography, full.profileImage, ts, ts);
 
-      const wikiTitle = await wikipediaSearchTitle(full.name).catch(() => null);
-      const wiki = await wikipediaSummaryByTitle(wikiTitle).catch(() => null);
+      const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
+      const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
       updatePersonWiki(db, personId, wiki);
       upsertedPersonIds.push(personId);
 
@@ -4790,8 +4790,8 @@ app.get('/api/search', async (req, res) => {
   if (refreshed.movies.length === 0 && refreshed.persons.length === 0) {
     try {
       const wikiTitle =
-        (await wikipediaSearchTitle(q).catch(() => null)) ||
-        (await wikipediaSearchTitle(`${q} film`).catch(() => null));
+        (await wikipediaSearchTitle(q, { db }).catch(() => null)) ||
+        (await wikipediaSearchTitle(`${q} film`, { db }).catch(() => null));
       if (wikiTitle && wikiTitle.toLowerCase() !== q.toLowerCase()) {
         const retryHits = await tmdbSearchMovie(wikiTitle).catch(() => []);
         for (const hit of retryHits) {
@@ -4973,8 +4973,8 @@ app.get('/api/person/:id', async (req, res) => {
       `
       ).run(personId, full.tmdbId, full.name, soundex(full.name), full.biography, full.profileImage, ts, ts);
 
-      const wikiTitle = await wikipediaSearchTitle(full.name).catch(() => null);
-      const wiki = await wikipediaSummaryByTitle(wikiTitle).catch(() => null);
+      const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
+      const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
       updatePersonWiki(db, personId, wiki);
       p = hydratePerson(db, personId);
     } catch {
@@ -4991,8 +4991,8 @@ app.get('/api/person/:id', async (req, res) => {
       filmography = full.filmography || [];
       // Ensure wiki if still missing.
       if (!p.wikiUrl) {
-        const wikiTitle = await wikipediaSearchTitle(p.name).catch(() => null);
-        const wiki = await wikipediaSummaryByTitle(wikiTitle).catch(() => null);
+        const wikiTitle = await wikipediaSearchTitle(p.name, { db }).catch(() => null);
+        const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
         updatePersonWiki(db, personId, wiki);
       }
     } catch {
