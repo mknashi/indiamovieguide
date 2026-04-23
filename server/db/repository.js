@@ -219,7 +219,9 @@ export function updateMovieFts(db, movieId) {
     const m = db.prepare('SELECT title, synopsis, language, director FROM movies WHERE id = ?').get(movieId);
     if (!m) return;
     const genres = db.prepare('SELECT genre FROM movie_genres WHERE movie_id = ?').all(movieId).map((r) => r.genre).join(' ');
-    const body = [m.synopsis, m.language, m.director, genres].filter(Boolean).join(' ').slice(0, 1000);
+    // Per-token soundex codes let phonetic queries ("saha*" → S000 = soundex("shah")) match via body.
+    const sxTokens = (m.title || '').split(/\s+/).filter((t) => t.length >= 2).map((t) => soundex(t)).filter((sx) => sx && sx !== '0000').join(' ');
+    const body = [m.synopsis, m.language, m.director, genres, sxTokens].filter(Boolean).join(' ').slice(0, 1200);
     db.prepare('DELETE FROM search_index WHERE entity_id = ? AND entity_type = ?').run(movieId, 'movie');
     db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(movieId, 'movie', m.title || '', body);
   } catch {
@@ -232,8 +234,11 @@ export function updatePersonFts(db, personId) {
   try {
     const p = db.prepare('SELECT name, biography FROM persons WHERE id = ?').get(personId);
     if (!p) return;
+    // Per-token soundex codes let phonetic queries ("saha" → S000 = soundex("shah")) match via body.
+    const sxTokens = (p.name || '').split(/\s+/).filter((t) => t.length >= 2).map((t) => soundex(t)).filter((sx) => sx && sx !== '0000').join(' ');
+    const body = [(p.biography || '').slice(0, 500), sxTokens].filter(Boolean).join(' ');
     db.prepare('DELETE FROM search_index WHERE entity_id = ? AND entity_type = ?').run(personId, 'person');
-    db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(personId, 'person', p.name || '', (p.biography || '').slice(0, 500));
+    db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(personId, 'person', p.name || '', body);
   } catch {
     // FTS update is best-effort.
   }
@@ -362,6 +367,9 @@ function buildFtsQueries(q) {
   if (tokens.length > 1) queries.push(`"${tokens.join(' ')}"`); // exact phrase
   queries.push(tokens.join(' '));                                 // AND of tokens
   queries.push(tokens.map((t) => `${t}*`).join(' '));            // prefix of each token
+  // Tier 4: per-token soundex — catches phonetic misspellings stored in body ("saha"→S000 = soundex("shah")).
+  const sxTokens = tokens.map((t) => soundex(t)).filter((sx) => sx && sx !== '0000');
+  if (sxTokens.length) queries.push(sxTokens.join(' '));
   return queries;
 }
 

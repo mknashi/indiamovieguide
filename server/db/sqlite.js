@@ -338,30 +338,41 @@ export function migrate(db) {
     )
   `);
 
-  // One-time backfill: populate FTS from existing movies and persons.
-  const ftsCount = db.prepare('SELECT COUNT(*) as c FROM search_index').get().c;
-  if (!ftsCount) {
+  // FTS rebuild — runs on first boot or whenever FTS_VERSION is bumped.
+  // Version 2: added per-token soundex codes to body for phonetic matching.
+  const FTS_VERSION = '2';
+  const ftsVersionRow = (() => {
+    try { return db.prepare("SELECT value FROM app_meta WHERE key = 'fts_v'").get(); } catch { return null; }
+  })();
+  if (!ftsVersionRow || ftsVersionRow.value !== FTS_VERSION) {
     try {
       const insertFts = db.prepare(
         'INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)'
       );
       const getGenres = db.prepare('SELECT genre FROM movie_genres WHERE movie_id = ?');
+      const sxBody = (name) =>
+        (name || '').split(/\s+/).filter((t) => t.length >= 2).map((t) => soundex(t)).filter((sx) => sx && sx !== '0000').join(' ');
       db.transaction(() => {
+        db.prepare('DELETE FROM search_index').run();
         const movies = db
           .prepare('SELECT id, title, synopsis, language, director FROM movies WHERE COALESCE(is_indian, 1) = 1')
           .all();
         for (const m of movies) {
           const genres = getGenres.all(m.id).map((r) => r.genre).join(' ');
-          const body = [m.synopsis, m.language, m.director, genres].filter(Boolean).join(' ').slice(0, 1000);
+          const body = [m.synopsis, m.language, m.director, genres, sxBody(m.title)].filter(Boolean).join(' ').slice(0, 1200);
           insertFts.run(m.id, 'movie', m.title || '', body);
         }
         const persons = db.prepare('SELECT id, name, biography FROM persons').all();
         for (const p of persons) {
-          insertFts.run(p.id, 'person', p.name || '', (p.biography || '').slice(0, 500));
+          const body = [(p.biography || '').slice(0, 500), sxBody(p.name)].filter(Boolean).join(' ');
+          insertFts.run(p.id, 'person', p.name || '', body);
         }
+        db.prepare("INSERT OR REPLACE INTO app_meta(key, value, updated_at) VALUES ('fts_v', ?, ?)")
+          .run(FTS_VERSION, new Date().toISOString());
       })();
+      console.log('[db] FTS index rebuilt with soundex tokens (v2)');
     } catch (err) {
-      console.error('[db] FTS backfill error:', err.message);
+      console.error('[db] FTS rebuild error:', err.message);
     }
   }
 
