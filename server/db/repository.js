@@ -207,7 +207,36 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
     }
   }
 
+  // Keep FTS index in sync.
+  updateMovieFts(db, id);
+
   return id;
+}
+
+// Update the FTS entry for a movie. Call after every upsert (genres must already be in DB).
+export function updateMovieFts(db, movieId) {
+  try {
+    const m = db.prepare('SELECT title, synopsis, language, director FROM movies WHERE id = ?').get(movieId);
+    if (!m) return;
+    const genres = db.prepare('SELECT genre FROM movie_genres WHERE movie_id = ?').all(movieId).map((r) => r.genre).join(' ');
+    const body = [m.synopsis, m.language, m.director, genres].filter(Boolean).join(' ').slice(0, 1000);
+    db.prepare('DELETE FROM search_index WHERE entity_id = ? AND entity_type = ?').run(movieId, 'movie');
+    db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(movieId, 'movie', m.title || '', body);
+  } catch {
+    // FTS update is best-effort; never block a write for it.
+  }
+}
+
+// Update the FTS entry for a person. Call after biography or name changes.
+export function updatePersonFts(db, personId) {
+  try {
+    const p = db.prepare('SELECT name, biography FROM persons WHERE id = ?').get(personId);
+    if (!p) return;
+    db.prepare('DELETE FROM search_index WHERE entity_id = ? AND entity_type = ?').run(personId, 'person');
+    db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(personId, 'person', p.name || '', (p.biography || '').slice(0, 500));
+  } catch {
+    // FTS update is best-effort.
+  }
 }
 
 export function upsertRatingsFromOmdb(db, movieId, omdb) {
@@ -322,49 +351,74 @@ export function updatePersonWiki(db, personId, wiki) {
   ).run(hashId('attr', `${personId}:wikipedia`), 'person', personId, 'wikipedia', wiki.title || '', wiki.url || '', nowIso());
 }
 
+// Build a ranked list of FTS5 queries to try in order (most strict → most relaxed).
+// Returns [] if the query produces nothing usable.
+function buildFtsQueries(q) {
+  const cleaned = String(q || '').replace(/["*()\^:+\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return [];
+  const tokens = cleaned.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+  if (!tokens.length) return [];
+  const queries = [];
+  if (tokens.length > 1) queries.push(`"${tokens.join(' ')}"`); // exact phrase
+  queries.push(tokens.join(' '));                                 // AND of tokens
+  queries.push(tokens.map((t) => `${t}*`).join(' '));            // prefix of each token
+  return queries;
+}
+
 export function searchLocal(db, q) {
-  const needle = `%${q.toLowerCase()}%`;
-  const indianOnly = `COALESCE(m.is_indian, 1) = 1`;
+  // Phase 1: FTS5 — fast BM25-ranked full-text search.
+  // Weights: title column (slot 2) = 10x, body column (slot 3) = 1x.
+  // bm25() returns negative values; ORDER BY ascending = best match first.
+  const seenMovies = new Set();
+  const seenPersons = new Set();
+  const ftsMovieIds = [];
+  const ftsPersonIds = [];
 
-  const movieRows = db
-    .prepare(
-      `
-      SELECT DISTINCT m.*
-      FROM movies m
-      LEFT JOIN movie_genres mg ON mg.movie_id = m.id
-      LEFT JOIN movie_cast mc ON mc.movie_id = m.id
-      LEFT JOIN persons p ON p.id = mc.person_id
-      WHERE ${indianOnly}
-       AND (lower(m.title) LIKE ?
-         OR lower(m.synopsis) LIKE ?
-         OR lower(p.name) LIKE ?
-         OR lower(mg.genre) LIKE ?)
-      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC
-      LIMIT 50
-    `
-    )
-    .all(needle, needle, needle, needle);
+  for (const ftsQuery of buildFtsQueries(q)) {
+    try {
+      const hits = db
+        .prepare(
+          `SELECT entity_id, entity_type
+           FROM search_index
+           WHERE search_index MATCH ?
+           ORDER BY bm25(search_index, 0, 0, 10, 1)
+           LIMIT 30`
+        )
+        .all(ftsQuery);
 
-  const personRows = db
-    .prepare(
-      `
-      SELECT *
-      FROM persons
-      WHERE lower(name) LIKE ? OR lower(biography) LIKE ?
-      ORDER BY name ASC
-      LIMIT 50
-    `
-    )
-    .all(needle, needle);
+      for (const h of hits) {
+        if (h.entity_type === 'movie' && !seenMovies.has(h.entity_id)) {
+          seenMovies.add(h.entity_id);
+          ftsMovieIds.push(h.entity_id);
+        } else if (h.entity_type === 'person' && !seenPersons.has(h.entity_id)) {
+          seenPersons.add(h.entity_id);
+          ftsPersonIds.push(h.entity_id);
+        }
+      }
+      if (ftsMovieIds.length >= 5 || ftsPersonIds.length >= 3) break;
+    } catch {
+      // Malformed FTS query (e.g. only stopwords) — try next tier.
+    }
+  }
 
-  if (movieRows.length || personRows.length) {
+  if (ftsMovieIds.length || ftsPersonIds.length) {
+    // Enforce Indian-movie filter (FTS index covers all movies).
+    const indianMovieIds = ftsMovieIds.length
+      ? db
+          .prepare(
+            `SELECT id FROM movies WHERE id IN (${ftsMovieIds.map(() => '?').join(',')}) AND COALESCE(is_indian, 1) = 1`
+          )
+          .all(...ftsMovieIds)
+          .map((r) => r.id)
+      : [];
+
     return {
-      movies: movieRows.map((m) => hydrateMovie(db, m.id)),
-      persons: personRows.map((p) => hydratePerson(db, p.id))
+      movies: indianMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
+      persons: ftsPersonIds.map((id) => hydratePerson(db, id)).filter(Boolean)
     };
   }
 
-  // "Sounds like" fallback when there are no substring matches.
+  // Phase 2: Soundex phonetic fallback for complete misspellings not caught by FTS prefix matching.
   const normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const diceCoefficient = (a, b) => {
     const s1 = normalize(a);
@@ -383,33 +437,22 @@ export function searchLocal(db, q) {
     const b1 = bigrams(s1);
     const b2 = bigrams(s2);
     let intersect = 0;
-    for (const [bg, n] of b1.entries()) {
-      const m = b2.get(bg) || 0;
-      intersect += Math.min(n, m);
-    }
-    return (2 * intersect) / ((s1.length - 1) + (s2.length - 1));
+    for (const [bg, n] of b1.entries()) intersect += Math.min(n, b2.get(bg) || 0);
+    return (2 * intersect) / (s1.length - 1 + (s2.length - 1));
   };
 
   const qn = normalize(q);
   const tokens = qn.split(/\s+/g).filter((t) => t.length >= 4);
-  const codes = Array.from(new Set([qn, ...tokens].map((t) => soundex(t)).filter((sx) => sx && sx !== '0000'))).slice(
-    0,
-    6
-  );
+  const codes = Array.from(
+    new Set([qn, ...tokens].map((t) => soundex(t)).filter((sx) => sx && sx !== '0000'))
+  ).slice(0, 6);
 
   if (!codes.length) return { movies: [], persons: [] };
   const placeholders = codes.map(() => '?').join(',');
+  const indianOnly = `COALESCE(m.is_indian, 1) = 1`;
 
   const rawFuzzyPersons = db
-    .prepare(
-      `
-      SELECT *
-      FROM persons
-      WHERE name_soundex IN (${placeholders})
-      ORDER BY name ASC
-      LIMIT 50
-    `
-    )
+    .prepare(`SELECT * FROM persons WHERE name_soundex IN (${placeholders}) ORDER BY name ASC LIMIT 50`)
     .all(...codes);
 
   const personMinScore = qn.length < 8 ? 0.55 : qn.length < 14 ? 0.42 : 0.32;
@@ -425,29 +468,19 @@ export function searchLocal(db, q) {
     const inPh = ids.map(() => '?').join(',');
     return db
       .prepare(
-        `
-        SELECT DISTINCT m.*
-        FROM movies m
-        JOIN movie_cast mc ON mc.movie_id = m.id
-        WHERE ${indianOnly}
-          AND mc.person_id IN (${inPh})
-        ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
-        LIMIT 50
-      `
+        `SELECT DISTINCT m.* FROM movies m
+         JOIN movie_cast mc ON mc.movie_id = m.id
+         WHERE ${indianOnly} AND mc.person_id IN (${inPh})
+         ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC LIMIT 50`
       )
       .all(...ids);
   })();
 
   const rawFuzzyMoviesByTitle = db
     .prepare(
-      `
-      SELECT DISTINCT m.*
-      FROM movies m
-      WHERE ${indianOnly}
-        AND m.title_soundex IN (${placeholders})
-      ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC
-      LIMIT 50
-    `
+      `SELECT DISTINCT m.* FROM movies m
+       WHERE ${indianOnly} AND m.title_soundex IN (${placeholders})
+       ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC LIMIT 50`
     )
     .all(...codes);
 
@@ -459,10 +492,9 @@ export function searchLocal(db, q) {
 
   const byId = new Map();
   for (const r of [...fuzzyMoviesByTitle, ...fuzzyMoviesByCast]) byId.set(r.id, r);
-  const finalMovieRows = Array.from(byId.values()).slice(0, 50);
 
   return {
-    movies: finalMovieRows.map((m) => hydrateMovie(db, m.id)).filter(Boolean),
+    movies: Array.from(byId.values()).slice(0, 50).map((m) => hydrateMovie(db, m.id)).filter(Boolean),
     persons: fuzzyPersonRows.map((p) => hydratePerson(db, p.id)).filter(Boolean)
   };
 }

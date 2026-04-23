@@ -326,6 +326,45 @@ export function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_release ON movies(lower(language), release_date DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movie_genres_genre_lower ON movie_genres(lower(genre))');
 
+  // FTS5 full-text search index — fast BM25-ranked queries across title + body.
+  // entity_id/entity_type are UNINDEXED (stored but not tokenized).
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+      entity_id UNINDEXED,
+      entity_type UNINDEXED,
+      title,
+      body,
+      tokenize='unicode61 remove_diacritics 1'
+    )
+  `);
+
+  // One-time backfill: populate FTS from existing movies and persons.
+  const ftsCount = db.prepare('SELECT COUNT(*) as c FROM search_index').get().c;
+  if (!ftsCount) {
+    try {
+      const insertFts = db.prepare(
+        'INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)'
+      );
+      const getGenres = db.prepare('SELECT genre FROM movie_genres WHERE movie_id = ?');
+      db.transaction(() => {
+        const movies = db
+          .prepare('SELECT id, title, synopsis, language, director FROM movies WHERE COALESCE(is_indian, 1) = 1')
+          .all();
+        for (const m of movies) {
+          const genres = getGenres.all(m.id).map((r) => r.genre).join(' ');
+          const body = [m.synopsis, m.language, m.director, genres].filter(Boolean).join(' ').slice(0, 1000);
+          insertFts.run(m.id, 'movie', m.title || '', body);
+        }
+        const persons = db.prepare('SELECT id, name, biography FROM persons').all();
+        for (const p of persons) {
+          insertFts.run(p.id, 'person', p.name || '', (p.biography || '').slice(0, 500));
+        }
+      })();
+    } catch (err) {
+      console.error('[db] FTS backfill error:', err.message);
+    }
+  }
+
   // Backfill for existing rows so filtering and "sounds-like" search work immediately.
   try {
     db.exec('BEGIN');

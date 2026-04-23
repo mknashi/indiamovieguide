@@ -12,6 +12,7 @@ import {
   searchLocal,
   upsertMovieFromTmdb,
   upsertRatingsFromOmdb,
+  updatePersonFts,
   replaceSongsFromYoutube,
   replaceSongsForMovie,
   clearSongsForMovie,
@@ -4599,18 +4600,31 @@ app.get('/api/home', async (_req, res) => {
   res.json(payload);
 });
 
+// 30-second in-memory cache for search results to avoid repeated external calls.
+const searchCache = new Map();
+const SEARCH_CACHE_TTL_MS = 30 * 1000;
+
 app.get('/api/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ movies: [], persons: [] });
 
+  const cacheKey = q.toLowerCase();
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL_MS) {
+    return res.json(cached.data);
+  }
+
   const local = searchLocal(db, q);
   if (local.movies.length || local.persons.length) {
-    for (const m of local.movies.slice(0, 3)) {
-      await enrichMovieIfNeeded(m.id);
-    }
-
-    const refreshed = searchLocal(db, q);
-    return res.json({ ...refreshed, source: 'local' });
+    // Enrich top results in the background — don't block the response.
+    setImmediate(() => {
+      for (const m of local.movies.slice(0, 3)) {
+        enrichMovieIfNeeded(m.id).catch(() => {});
+      }
+    });
+    const data = { ...local, source: 'local' };
+    searchCache.set(cacheKey, { data, ts: Date.now() });
+    return res.json(data);
   }
 
   // Not found locally -> real-time search across providers (TMDB + YouTube + Wikipedia).
@@ -4730,6 +4744,7 @@ app.get('/api/search', async (req, res) => {
       const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
       const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
       updatePersonWiki(db, personId, wiki);
+      updatePersonFts(db, personId);
       upsertedPersonIds.push(personId);
 
       // Pull a few top filmography titles so "search by cast" returns movies too.
@@ -4822,7 +4837,9 @@ app.get('/api/search', async (req, res) => {
     }
   }
 
-  res.json({ ...refreshed, source: 'providers', ...(didYouMean ? { didYouMean } : {}) });
+  const data = { ...refreshed, source: 'providers', ...(didYouMean ? { didYouMean } : {}) };
+  searchCache.set(cacheKey, { data, ts: Date.now() });
+  res.json(data);
 });
 
 app.get('/api/movies/:id', async (req, res) => {
@@ -4977,6 +4994,7 @@ app.get('/api/person/:id', async (req, res) => {
       const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
       const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
       updatePersonWiki(db, personId, wiki);
+      updatePersonFts(db, personId);
       p = hydratePerson(db, personId);
     } catch {
       // ignore
@@ -4995,6 +5013,7 @@ app.get('/api/person/:id', async (req, res) => {
         const wikiTitle = await wikipediaSearchTitle(p.name, { db }).catch(() => null);
         const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
         updatePersonWiki(db, personId, wiki);
+        updatePersonFts(db, personId);
       }
     } catch {
       // ignore
