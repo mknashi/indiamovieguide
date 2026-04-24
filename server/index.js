@@ -4636,16 +4636,23 @@ app.get('/api/search', async (req, res) => {
   // Typo/alias fallback: use Wikipedia search to find the canonical page title, then retry TMDB.
   // Example: "Satte Pe Satte" -> Wikipedia likely returns "Satte Pe Satta" -> TMDB hit.
   let didYouMean = null;
-  if (!movieHits.length) {
-    const wikiTitle =
-      (await wikipediaSearchTitle(q, { db }).catch(() => null)) ||
-      (await wikipediaSearchTitle(`${q} film`, { db }).catch(() => null));
-    if (wikiTitle && wikiTitle.toLowerCase() !== q.toLowerCase()) {
-      const retry = await tmdbSearchMovie(wikiTitle).catch(() => []);
-      if (retry.length) {
-        movieHits = retry;
-        didYouMean = wikiTitle;
-      }
+  // Wikipedia canonical name lookup — shared result for both movie and person retries below.
+  const wikiCanonical =
+    (await wikipediaSearchTitle(q, { db }).catch(() => null)) ||
+    (await wikipediaSearchTitle(`${q} film`, { db }).catch(() => null));
+  if (!movieHits.length && wikiCanonical && wikiCanonical.toLowerCase() !== q.toLowerCase()) {
+    const retry = await tmdbSearchMovie(wikiCanonical).catch(() => []);
+    if (retry.length) {
+      movieHits = retry;
+      didYouMean = wikiCanonical;
+    }
+  }
+  // Same retry for persons — catches phonetic misspellings like "saha rukh khan" -> "Shah Rukh Khan".
+  if (!personHits.length && wikiCanonical && wikiCanonical.toLowerCase() !== q.toLowerCase()) {
+    const retry = await tmdbSearchPerson(wikiCanonical).catch(() => []);
+    if (retry.length) {
+      personHits = retry;
+      if (!didYouMean) didYouMean = wikiCanonical;
     }
   }
 
