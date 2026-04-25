@@ -1,5 +1,6 @@
 import {
   INDIAN_LANGUAGES_LOWER,
+  buildPersonSearchKeys,
   hashId,
   makeId,
   normalizeForSearch,
@@ -100,6 +101,7 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
         updated_at=excluded.updated_at
     `
     ).run(personId, c.tmdbId, c.name, soundex(c.name), soundex(c.name.trim().split(/\s+/)[0] || c.name), personId, personId, c.profileImage || '', personId, ts, ts);
+    upsertPersonSearchKeys(db, personId, c.name);
 
     db.prepare(
       'INSERT OR REPLACE INTO movie_cast(movie_id, person_id, character, billing_order) VALUES (?, ?, ?, ?)'
@@ -231,17 +233,18 @@ export function updateMovieFts(db, movieId) {
 }
 
 // Update the FTS entry for a person. Call after biography or name changes.
+// Also rebuilds person_search_keys so key-based search stays current.
 export function updatePersonFts(db, personId) {
   try {
     const p = db.prepare('SELECT name, biography FROM persons WHERE id = ?').get(personId);
     if (!p) return;
-    // Per-token soundex codes let phonetic queries ("saha" → S000 = soundex("shah")) match via body.
     const sxTokens = (p.name || '').split(/\s+/).filter((t) => t.length >= 2).map((t) => soundex(t)).filter((sx) => sx && sx !== '0000').join(' ');
     const body = [(p.biography || '').slice(0, 500), sxTokens].filter(Boolean).join(' ');
     db.prepare('DELETE FROM search_index WHERE entity_id = ? AND entity_type = ?').run(personId, 'person');
     db.prepare('INSERT INTO search_index(entity_id, entity_type, title, body) VALUES (?, ?, ?, ?)').run(personId, 'person', p.name || '', body);
+    upsertPersonSearchKeys(db, personId, p.name);
   } catch {
-    // FTS update is best-effort.
+    // best-effort
   }
 }
 
@@ -347,6 +350,18 @@ export function replaceSongsForMovie(db, movieId, songs, meta = {}) {
   }
 }
 
+// Rebuild the search key index for a person. Deletes stale keys first so name
+// changes are always reflected. Called on every person upsert path.
+export function upsertPersonSearchKeys(db, personId, name) {
+  try {
+    db.prepare('DELETE FROM person_search_keys WHERE person_id = ?').run(personId);
+    const ins = db.prepare('INSERT OR IGNORE INTO person_search_keys(key, person_id) VALUES (?, ?)');
+    for (const key of buildPersonSearchKeys(name)) ins.run(key, personId);
+  } catch {
+    // best-effort; never block a write for it
+  }
+}
+
 export function updatePersonWiki(db, personId, wiki) {
   if (!wiki) return;
   db.prepare('UPDATE persons SET biography = COALESCE(?, biography), wiki_url = COALESCE(?, wiki_url), profile_image = COALESCE(?, profile_image), updated_at = ? WHERE id = ?')
@@ -355,29 +370,6 @@ export function updatePersonWiki(db, personId, wiki) {
   db.prepare(
     'INSERT OR IGNORE INTO attributions(id, entity_type, entity_id, provider, provider_id, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(hashId('attr', `${personId}:wikipedia`), 'person', personId, 'wikipedia', wiki.title || '', wiki.url || '', nowIso());
-}
-
-// Re-rank a list of person IDs by prominence: Indian movie count, then profile image, then bio.
-// Called after relevance filtering so we sort within already-relevant results.
-function rankPersonsByProminence(db, personIds) {
-  if (personIds.length <= 1) return personIds;
-  const inPh = personIds.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `SELECT p.id,
-              COUNT(DISTINCT mc.movie_id) AS movie_count,
-              CASE WHEN p.profile_image IS NOT NULL AND p.profile_image != '' THEN 1 ELSE 0 END AS has_image,
-              CASE WHEN length(COALESCE(p.biography,'')) > 50 THEN 1 ELSE 0 END AS has_bio
-       FROM persons p
-       LEFT JOIN movie_cast mc ON mc.person_id = p.id
-       LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
-       WHERE p.id IN (${inPh})
-       GROUP BY p.id
-       ORDER BY movie_count DESC, has_image DESC, has_bio DESC`
-    )
-    .all(...personIds);
-  const order = new Map(rows.map((r, i) => [r.id, i]));
-  return [...personIds].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
 }
 
 // Build a ranked list of FTS5 queries to try in order (most strict → most relaxed).
@@ -397,37 +389,84 @@ function buildFtsQueries(q) {
   return queries;
 }
 
-export function searchLocal(db, q) {
-  const normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const diceCoefficient = (a, b) => {
-    const s1 = normalize(a);
-    const s2 = normalize(b);
+// Search persons by pre-built key index. Generates the same key variants as
+// buildPersonSearchKeys (tokens, soundex, compounds, 'a'-bridge), looks them up
+// in person_search_keys, ranks by Indian movie count, and applies a dice filter
+// to remove false positives. Returns up to 5 person IDs.
+function searchPersonsByKeys(db, q) {
+  const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = normKey(q).split(' ').filter((t) => t.length >= 2);
+  if (!tokens.length) return [];
+
+  const queryKeys = new Set();
+  const add = (k) => { const s = String(k || '').trim(); if (s.length >= 2 && s !== '0000') queryKeys.add(s); };
+
+  add(tokens.join(' '));
+  for (const t of tokens) { add(t); add(soundex(t)); }
+  if (tokens.length >= 2) {
+    add(tokens.join(''));
+    add(soundex(tokens.join('')));
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const pair = tokens[i] + tokens[i + 1];
+      add(pair); add(soundex(pair));
+      const pairA = tokens[i] + 'a' + tokens[i + 1];
+      add(pairA); add(soundex(pairA));
+    }
+  }
+
+  const keysArr = [...queryKeys].slice(0, 20);
+  const ph = keysArr.map(() => '?').join(',');
+
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.name,
+              COUNT(DISTINCT mc.movie_id) AS movie_count,
+              CASE WHEN p.profile_image IS NOT NULL AND p.profile_image != '' THEN 1 ELSE 0 END AS has_image,
+              CASE WHEN length(COALESCE(p.biography,'')) > 50 THEN 1 ELSE 0 END AS has_bio
+       FROM person_search_keys psk
+       JOIN persons p ON p.id = psk.person_id
+       LEFT JOIN movie_cast mc ON mc.person_id = p.id
+       LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian, 1) = 1
+       WHERE psk.key IN (${ph})
+       GROUP BY p.id
+       ORDER BY movie_count DESC, has_image DESC, has_bio DESC
+       LIMIT 15`
+    )
+    .all(...keysArr);
+
+  // Dice filter removes names that only matched via a shared soundex code but
+  // are not actually similar to the query (e.g. "Moitree" matching "maduri").
+  const normDice = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const dice = (a, b) => {
+    const s1 = normDice(a); const s2 = normDice(b);
     if (!s1 || !s2) return 0;
     if (s1 === s2) return 1;
     if (s1.length < 2 || s2.length < 2) return 0;
-    const bigrams = (s) => {
-      const out = new Map();
-      for (let i = 0; i < s.length - 1; i++) {
-        const bg = s.slice(i, i + 2);
-        out.set(bg, (out.get(bg) || 0) + 1);
-      }
-      return out;
-    };
-    const b1 = bigrams(s1);
-    const b2 = bigrams(s2);
-    let intersect = 0;
-    for (const [bg, n] of b1.entries()) intersect += Math.min(n, b2.get(bg) || 0);
-    return (2 * intersect) / (s1.length - 1 + (s2.length - 1));
+    const bg = (s) => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const b = s.slice(i, i+2); m.set(b, (m.get(b)||0)+1); } return m; };
+    const b1 = bg(s1); const b2 = bg(s2);
+    let n = 0; for (const [k, c] of b1) n += Math.min(c, b2.get(k)||0);
+    return (2 * n) / (s1.length - 1 + s2.length - 1);
   };
 
-  // Phase 1: FTS5 — fast BM25-ranked full-text search.
-  // Weights: title column (slot 2) = 10x, body column (slot 3) = 1x.
-  // bm25() returns negative values; ORDER BY ascending = best match first.
-  const seenMovies = new Set();
-  const seenPersons = new Set();
-  const ftsMovieIds = [];
-  const ftsPersonIds = [];
+  const qn = normDice(q);
+  const minDice = qn.length <= 4 ? 0.25 : qn.length <= 6 ? 0.30 : 0.35;
 
+  return rows
+    .filter((r) => dice(qn, r.name) >= minDice)
+    .slice(0, 5)
+    .map((r) => r.id);
+}
+
+export function searchLocal(db, q) {
+  // === Person search via pre-built key index ===
+  // Indexed by exact tokens, per-token soundex, adjacent-pair compounds, and 'a'-bridge
+  // variants. Ranked by Indian movie count so prominent actors always surface first.
+  const personIds = searchPersonsByKeys(db, q);
+
+  // === Movie search via FTS5 (BM25-ranked) ===
+  // FTS is kept only for movies; person search moved entirely to key index above.
+  const seenMovies = new Set();
+  const ftsMovieIds = [];
   for (const ftsQuery of buildFtsQueries(q)) {
     try {
       const hits = db
@@ -439,146 +478,44 @@ export function searchLocal(db, q) {
            LIMIT 30`
         )
         .all(ftsQuery);
-
       for (const h of hits) {
         if (h.entity_type === 'movie' && !seenMovies.has(h.entity_id)) {
           seenMovies.add(h.entity_id);
           ftsMovieIds.push(h.entity_id);
-        } else if (h.entity_type === 'person' && !seenPersons.has(h.entity_id)) {
-          seenPersons.add(h.entity_id);
-          ftsPersonIds.push(h.entity_id);
         }
       }
-      if (ftsMovieIds.length >= 5 || ftsPersonIds.length >= 10) break;
+      if (ftsMovieIds.length >= 5) break;
     } catch {
-      // Malformed FTS query (e.g. only stopwords) — try next tier.
+      // Malformed FTS query — try next tier.
     }
   }
 
-  if (ftsMovieIds.length || ftsPersonIds.length) {
-    // Enforce Indian-movie filter (FTS index covers all movies).
-    const indianMovieIds = ftsMovieIds.length
-      ? db
-          .prepare(
-            `SELECT id FROM movies WHERE id IN (${ftsMovieIds.map(() => '?').join(',')}) AND COALESCE(is_indian, 1) = 1`
-          )
-          .all(...ftsMovieIds)
-          .map((r) => r.id)
-      : [];
+  const movieIds = ftsMovieIds.length
+    ? db
+        .prepare(`SELECT id FROM movies WHERE id IN (${ftsMovieIds.map(() => '?').join(',')}) AND COALESCE(is_indian, 1) = 1`)
+        .all(...ftsMovieIds)
+        .map((r) => r.id)
+    : [];
 
-    // When FTS found persons but no movies (e.g. phonetic person search like "shaha rukh khan"),
-    // look up their filmography so the caller gets both the actor and their movies.
-    let castMovieIds = [];
-    if (!indianMovieIds.length && ftsPersonIds.length) {
-      const inPh = ftsPersonIds.map(() => '?').join(',');
-      castMovieIds = db
-        .prepare(
-          `SELECT DISTINCT m.id FROM movies m
-           JOIN movie_cast mc ON mc.movie_id = m.id
-           WHERE COALESCE(m.is_indian, 1) = 1 AND mc.person_id IN (${inPh})
-           ORDER BY COALESCE(m.release_date, '0000-00-00') DESC LIMIT 50`
-        )
-        .all(...ftsPersonIds)
-        .map((r) => r.id);
-    }
-
-    const allMovieIds = indianMovieIds.length ? indianMovieIds : castMovieIds;
-
-    // For short queries (1-2 tokens), FTS soundex tier can match many unrelated names.
-    // Apply a dice similarity filter so we only keep names that actually resemble the query,
-    // then prominence-rank the survivors and cap at 5.
-    const qn1 = normalize(q);
-    let filteredPersonIds = ftsPersonIds;
-    if (ftsPersonIds.length > 3 && qn1.split(/\s+/).filter(Boolean).length <= 2) {
-      const names = db
-        .prepare(`SELECT id, name FROM persons WHERE id IN (${ftsPersonIds.map(() => '?').join(',')})`)
-        .all(...ftsPersonIds);
-      const nameById = new Map(names.map((r) => [r.id, r.name]));
-      const minDice = qn1.length < 6 ? 0.35 : 0.45;
-      const scored = ftsPersonIds
-        .map((id) => ({ id, score: diceCoefficient(qn1, nameById.get(id) || '') }))
-        .filter((x) => x.score >= minDice)
-        .sort((a, b) => b.score - a.score);
-      filteredPersonIds = scored.length ? scored.map((x) => x.id) : ftsPersonIds.slice(0, 3);
-    }
-
-    return {
-      movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
-      persons: rankPersonsByProminence(db, filteredPersonIds).slice(0, 5).map((id) => hydratePerson(db, id)).filter(Boolean)
-    };
-  }
-
-  // Phase 2: Soundex phonetic fallback for complete misspellings not caught by FTS prefix matching.
-  const qn = normalize(q);
-  const tokens = qn.split(/\s+/g).filter((t) => t.length >= 4);
-  const codes = Array.from(
-    new Set([qn, ...tokens].map((t) => soundex(t)).filter((sx) => sx && sx !== '0000'))
-  ).slice(0, 6);
-
-  if (!codes.length) return { movies: [], persons: [] };
-  const placeholders = codes.map(() => '?').join(',');
-  const indianOnly = `COALESCE(m.is_indian, 1) = 1`;
-
-  const rawFuzzyPersons = db
-    .prepare(
-      `SELECT p.*, COUNT(DISTINCT mc.movie_id) AS _movie_count
-       FROM persons p
-       LEFT JOIN movie_cast mc ON mc.person_id = p.id
-       LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
-       WHERE p.name_soundex IN (${placeholders}) OR p.first_name_soundex IN (${placeholders})
-       GROUP BY p.id
-       ORDER BY p.name ASC LIMIT 50`
-    )
-    .all(...codes, ...codes);
-
-  const personMinScore = qn.length < 8 ? 0.55 : qn.length < 14 ? 0.42 : 0.32;
-  const fuzzyPersonRows = rawFuzzyPersons
-    .map((p) => ({ ...p, _score: diceCoefficient(qn, p.name) }))
-    .filter((p) => p._score >= personMinScore)
-    // Composite rank: dice relevance + logarithmic prominence bonus.
-    // log10(51)*0.05 ≈ 0.085, so a 50-film actor gains ~0.09 — enough to lift
-    // Madhuri Dixit above a no-film namesake without overriding a better name match.
-    .sort((a, b) => {
-      const sa = a._score + Math.log10(1 + (a._movie_count || 0)) * 0.05;
-      const sb = b._score + Math.log10(1 + (b._movie_count || 0)) * 0.05;
-      return sb - sa;
-    })
-    .slice(0, 12);
-
-  const fuzzyMoviesByCast = (() => {
-    if (!fuzzyPersonRows.length) return [];
-    const ids = fuzzyPersonRows.map((p) => p.id);
-    const inPh = ids.map(() => '?').join(',');
-    return db
+  // When person found but no movie title match, pull their filmography.
+  let castMovieIds = [];
+  if (!movieIds.length && personIds.length) {
+    const inPh = personIds.map(() => '?').join(',');
+    castMovieIds = db
       .prepare(
-        `SELECT DISTINCT m.* FROM movies m
+        `SELECT DISTINCT m.id FROM movies m
          JOIN movie_cast mc ON mc.movie_id = m.id
-         WHERE ${indianOnly} AND mc.person_id IN (${inPh})
-         ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC LIMIT 50`
+         WHERE COALESCE(m.is_indian, 1) = 1 AND mc.person_id IN (${inPh})
+         ORDER BY COALESCE(m.release_date, '0000-00-00') DESC LIMIT 50`
       )
-      .all(...ids);
-  })();
+      .all(...personIds)
+      .map((r) => r.id);
+  }
 
-  const rawFuzzyMoviesByTitle = db
-    .prepare(
-      `SELECT DISTINCT m.* FROM movies m
-       WHERE ${indianOnly} AND m.title_soundex IN (${placeholders})
-       ORDER BY COALESCE(m.release_date, '0000-00-00') DESC, m.title ASC LIMIT 50`
-    )
-    .all(...codes);
-
-  const movieMinScore = qn.length < 8 ? 0.55 : qn.length < 14 ? 0.42 : 0.32;
-  const fuzzyMoviesByTitle = rawFuzzyMoviesByTitle
-    .map((m) => ({ ...m, _score: diceCoefficient(qn, m.title) }))
-    .filter((m) => m._score >= movieMinScore)
-    .sort((a, b) => b._score - a._score);
-
-  const byId = new Map();
-  for (const r of [...fuzzyMoviesByTitle, ...fuzzyMoviesByCast]) byId.set(r.id, r);
-
+  const allMovieIds = movieIds.length ? movieIds : castMovieIds;
   return {
-    movies: Array.from(byId.values()).slice(0, 50).map((m) => hydrateMovie(db, m.id)).filter(Boolean),
-    persons: fuzzyPersonRows.map((p) => hydratePerson(db, p.id)).filter(Boolean)
+    movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
+    persons: personIds.map((id) => hydratePerson(db, id)).filter(Boolean)
   };
 }
 

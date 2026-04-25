@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { INDIAN_LANGUAGES_LOWER, normalizeForSearch, soundex } from '../repo.js';
+import { INDIAN_LANGUAGES_LOWER, buildPersonSearchKeys, normalizeForSearch, soundex } from '../repo.js';
 
 const DEFAULT_DB_PATH = path.join(process.cwd(), '.cache', 'indiamovieguide.sqlite');
 const LEGACY_DB_PATH = path.join(process.cwd(), '.cache', 'indianmovieguide.sqlite');
@@ -378,6 +378,40 @@ export function migrate(db) {
     } catch (err) {
       console.error('[db] FTS rebuild error:', err.message);
     }
+  }
+
+  // person_search_keys — pre-built index of every search variant for each actor.
+  // Covers exact tokens, per-token soundex, compounds, and the Indian 'a'-bridge form
+  // (e.g. "Raj Kumar" → stores "rajkumar" AND "rajakumar" so both queries match).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS person_search_keys (
+      key       TEXT NOT NULL,
+      person_id TEXT NOT NULL,
+      PRIMARY KEY (key, person_id),
+      FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_psk_key    ON person_search_keys(key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_psk_person ON person_search_keys(person_id)');
+
+  // Backfill any persons whose search keys haven't been built yet.
+  try {
+    const missing = db.prepare(
+      `SELECT id, name FROM persons
+       WHERE id NOT IN (SELECT DISTINCT person_id FROM person_search_keys)
+       LIMIT 2000`
+    ).all();
+    if (missing.length) {
+      const ins = db.prepare('INSERT OR IGNORE INTO person_search_keys(key, person_id) VALUES (?, ?)');
+      db.transaction(() => {
+        for (const p of missing) {
+          for (const key of buildPersonSearchKeys(p.name)) ins.run(key, p.id);
+        }
+      })();
+      console.log(`[db] Built person_search_keys for ${missing.length} persons`);
+    }
+  } catch (err) {
+    console.error('[db] person_search_keys backfill error:', err.message);
   }
 
   // Backfill for existing rows so filtering and "sounds-like" search work immediately.

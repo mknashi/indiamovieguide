@@ -50,6 +50,50 @@ export function normalizeForSearch(input) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+// Build a set of search keys for a person's name covering all likely search variants:
+// exact tokens, soundex of each token, compound forms, and the Indian 'a'-bridge compound
+// (e.g. "Raj Kumar" → also stores "rajakumar" so that query matches).
+export function buildPersonSearchKeys(name) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = norm(name).split(' ').filter((t) => t.length >= 2);
+  if (!tokens.length) return [];
+
+  const keys = new Set();
+  const add = (k) => {
+    const s = String(k || '').trim();
+    if (s.length >= 2 && s !== '0000') keys.add(s);
+  };
+
+  // Full normalized name: "madhuri dixit"
+  add(tokens.join(' '));
+
+  // Each token + its soundex: "madhuri" M360, "dixit" D230
+  for (const t of tokens) {
+    add(t);
+    add(soundex(t));
+  }
+
+  if (tokens.length >= 2) {
+    // Compound (no space): "madhuridixit" + soundex M363
+    add(tokens.join(''));
+    add(soundex(tokens.join('')));
+
+    // Adjacent-pair compounds — handles merged spellings and the Indian 'a'-vowel bridge
+    // e.g. "Raj Kumar" → "rajkumar" (R256) and "rajakumar" (R225)
+    //      "Shah Rukh Khan" → "shahrukh" + "shaharukh" pair keys
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const pair = tokens[i] + tokens[i + 1];
+      add(pair);
+      add(soundex(pair));
+      const pairA = tokens[i] + 'a' + tokens[i + 1];
+      add(pairA);
+      add(soundex(pairA));
+    }
+  }
+
+  return [...keys];
+}
+
 // Basic Soundex (good enough for "sounds like" across English transliterations).
 export function soundex(input) {
   const s = String(input || '')
