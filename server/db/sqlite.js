@@ -299,6 +299,9 @@ export function migrate(db) {
   if (!hasColumn('persons', 'name_soundex')) {
     db.exec('ALTER TABLE persons ADD COLUMN name_soundex TEXT');
   }
+  if (!hasColumn('persons', 'first_name_soundex')) {
+    db.exec('ALTER TABLE persons ADD COLUMN first_name_soundex TEXT');
+  }
   if (!hasColumn('persons', 'filmography_json')) {
     db.exec('ALTER TABLE persons ADD COLUMN filmography_json TEXT');
   }
@@ -321,6 +324,7 @@ export function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_soundex ON movies(title_soundex)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_title_norm ON movies(title_norm)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_persons_name_soundex ON persons(name_soundex)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_persons_first_name_soundex ON persons(first_name_soundex)');
   // Expression indexes so browse WHERE/ORDER BY clauses can use indexes.
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_lower ON movies(lower(language))');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_release ON movies(lower(language), release_date DESC)');
@@ -420,6 +424,16 @@ export function migrate(db) {
       for (const r of rows) {
         const sx = r.name_soundex ? String(r.name_soundex) : '';
         if (!sx) stmt.run(soundex(r.name), r.id);
+      }
+    }
+    if (hasColumn('persons', 'first_name_soundex')) {
+      const rows = db.prepare('SELECT id, name, first_name_soundex FROM persons').all();
+      const stmt = db.prepare('UPDATE persons SET first_name_soundex = ? WHERE id = ?');
+      for (const r of rows) {
+        if (!r.first_name_soundex) {
+          const firstName = String(r.name || '').trim().split(/\s+/)[0] || '';
+          stmt.run(soundex(firstName), r.id);
+        }
       }
     }
     db.exec('COMMIT');

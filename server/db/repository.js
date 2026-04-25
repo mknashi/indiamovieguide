@@ -84,9 +84,9 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
     const ts = nowIso();
     db.prepare(
       `
-      INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+      INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
       VALUES (
-        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
         COALESCE((SELECT biography FROM persons WHERE id = ?), ''),
         COALESCE((SELECT wiki_url FROM persons WHERE id = ?), ''),
         COALESCE(?, COALESCE((SELECT profile_image FROM persons WHERE id = ?), '')),
@@ -95,10 +95,11 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         name_soundex=excluded.name_soundex,
+        first_name_soundex=excluded.first_name_soundex,
         profile_image=CASE WHEN excluded.profile_image != '' THEN excluded.profile_image ELSE persons.profile_image END,
         updated_at=excluded.updated_at
     `
-    ).run(personId, c.tmdbId, c.name, soundex(c.name), personId, personId, c.profileImage || '', personId, ts, ts);
+    ).run(personId, c.tmdbId, c.name, soundex(c.name), soundex(c.name.trim().split(/\s+/)[0] || c.name), personId, personId, c.profileImage || '', personId, ts, ts);
 
     db.prepare(
       'INSERT OR REPLACE INTO movie_cast(movie_id, person_id, character, billing_order) VALUES (?, ?, ?, ?)'
@@ -505,11 +506,11 @@ export function searchLocal(db, q) {
        FROM persons p
        LEFT JOIN movie_cast mc ON mc.person_id = p.id
        LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
-       WHERE p.name_soundex IN (${placeholders})
+       WHERE p.name_soundex IN (${placeholders}) OR p.first_name_soundex IN (${placeholders})
        GROUP BY p.id
        ORDER BY p.name ASC LIMIT 50`
     )
-    .all(...codes);
+    .all(...codes, ...codes);
 
   const personMinScore = qn.length < 8 ? 0.55 : qn.length < 14 ? 0.42 : 0.32;
   const fuzzyPersonRows = rawFuzzyPersons

@@ -3537,11 +3537,12 @@ app.get('/api/spotlight', async (_req, res) => {
         const ts = nowIso();
         db.prepare(
           `
-          INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-          VALUES (?, ?, ?, ?, COALESCE((SELECT biography FROM persons WHERE id = ?), ''), COALESCE((SELECT wiki_url FROM persons WHERE id = ?), ''), COALESCE(?, COALESCE((SELECT profile_image FROM persons WHERE id = ?), '')), ?, ?)
+          INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, COALESCE((SELECT biography FROM persons WHERE id = ?), ''), COALESCE((SELECT wiki_url FROM persons WHERE id = ?), ''), COALESCE(?, COALESCE((SELECT profile_image FROM persons WHERE id = ?), '')), ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             name_soundex=excluded.name_soundex,
+            first_name_soundex=excluded.first_name_soundex,
             profile_image=CASE WHEN excluded.profile_image != '' THEN excluded.profile_image ELSE persons.profile_image END,
             updated_at=excluded.updated_at
         `
@@ -3550,6 +3551,7 @@ app.get('/api/spotlight', async (_req, res) => {
           hit.tmdbId,
           hit.name,
           soundex(hit.name),
+          soundex(hit.name.trim().split(/\s+/)[0] || hit.name),
           personId,
           personId,
           hit.profileImage || '',
@@ -3928,11 +3930,12 @@ app.post('/api/admin/person-submissions/:id/approve', (req, res) => {
   try {
     db.prepare(
       `
-      INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, filmography_json, created_at, updated_at)
-      VALUES (?, NULL, ?, ?, ?, '', ?, ?, ?, ?)
+      INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, filmography_json, created_at, updated_at)
+      VALUES (?, NULL, ?, ?, ?, ?, '', ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         name_soundex=excluded.name_soundex,
+        first_name_soundex=excluded.first_name_soundex,
         biography=excluded.biography,
         profile_image=CASE WHEN excluded.profile_image != '' THEN excluded.profile_image ELSE persons.profile_image END,
         filmography_json=COALESCE(excluded.filmography_json, persons.filmography_json),
@@ -3942,6 +3945,7 @@ app.post('/api/admin/person-submissions/:id/approve', (req, res) => {
       personId,
       row.name,
       soundex(row.name),
+      soundex(row.name.trim().split(/\s+/)[0] || row.name),
       row.biography || '',
       row.profile_image || '',
       row.filmography_json || '[]',
@@ -4458,16 +4462,17 @@ app.post('/api/admin/movies/:id/cast/add', async (req, res) => {
         const ts = nowIso();
         db.prepare(
           `
-          INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)
+          INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             name_soundex=excluded.name_soundex,
+            first_name_soundex=excluded.first_name_soundex,
             biography=excluded.biography,
             profile_image=excluded.profile_image,
             updated_at=excluded.updated_at
         `
-        ).run(personId, full.tmdbId, full.name, soundex(full.name), full.biography || '', full.profileImage || '', ts, ts);
+        ).run(personId, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography || '', full.profileImage || '', ts, ts);
       } catch {
         // ignore
       }
@@ -4863,16 +4868,17 @@ app.get('/api/search', async (req, res) => {
       const ts = nowIso();
       db.prepare(
         `
-        INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)
+        INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name,
           name_soundex=excluded.name_soundex,
+          first_name_soundex=excluded.first_name_soundex,
           biography=excluded.biography,
           profile_image=excluded.profile_image,
           updated_at=excluded.updated_at
       `
-      ).run(personId, full.tmdbId, full.name, soundex(full.name), full.biography, full.profileImage, ts, ts);
+      ).run(personId, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography, full.profileImage, ts, ts);
 
       const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
       const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
@@ -5113,16 +5119,17 @@ app.get('/api/person/:id', async (req, res) => {
       const ts = nowIso();
       db.prepare(
         `
-        INSERT INTO persons (id, tmdb_id, name, name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)
+        INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name,
           name_soundex=excluded.name_soundex,
+          first_name_soundex=excluded.first_name_soundex,
           biography=excluded.biography,
           profile_image=excluded.profile_image,
           updated_at=excluded.updated_at
       `
-      ).run(personId, full.tmdbId, full.name, soundex(full.name), full.biography, full.profileImage, ts, ts);
+      ).run(personId, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography, full.profileImage, ts, ts);
 
       const wikiTitle = await wikipediaSearchTitle(full.name, { db }).catch(() => null);
       const wiki = await wikipediaSummaryByTitle(wikiTitle, { db }).catch(() => null);
