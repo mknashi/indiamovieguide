@@ -4727,7 +4727,19 @@ app.get('/api/search', async (req, res) => {
   }
 
   const local = searchLocal(db, q);
-  if (local.movies.length || local.persons.length) {
+
+  // Treat local persons-only results as low-quality if none of them appear in any Indian movie.
+  // This prevents non-Indian actors (e.g. "Reka Gabor" for "reka") from blocking the TMDB path
+  // that would import the actual Indian actress (Rekha).
+  const localPersonsHaveIndianMovies = local.persons.length > 0 && !!db
+    .prepare(
+      `SELECT 1 FROM movie_cast mc
+       JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
+       WHERE mc.person_id IN (${local.persons.map(() => '?').join(',')}) LIMIT 1`
+    )
+    .get(...local.persons.map((p) => p.id));
+
+  if (local.movies.length || localPersonsHaveIndianMovies) {
     // Enrich top results in the background — don't block the response.
     setImmediate(async () => {
       for (const m of local.movies.slice(0, 3)) {
@@ -4752,6 +4764,39 @@ app.get('/api/search', async (req, res) => {
           } catch { /* ignore */ }
         }
       }
+      // Also background-search TMDB for prominent actors matching this query.
+      // Covers the case where a famous actor (e.g. Madhuri Dixit for "maduri") isn't in the
+      // local DB yet. After import, bust the cache so the next request finds them.
+      try {
+        const ptHits = await tmdbSearchPerson(q).catch(() => []);
+        let importedNew = false;
+        for (const hit of ptHits.slice(0, 3)) {
+          const pid = makeId('tmdb-person', hit.tmdbId);
+          if (!db.prepare('SELECT id FROM persons WHERE id = ?').get(pid)) {
+            try {
+              const full = await tmdbGetPersonFull(hit.tmdbId);
+              const ts = nowIso();
+              db.prepare(
+                `INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, name_soundex=excluded.name_soundex, first_name_soundex=excluded.first_name_soundex,
+                   biography=excluded.biography, profile_image=excluded.profile_image, updated_at=excluded.updated_at`
+              ).run(pid, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography || '', full.profileImage || '', ts, ts);
+              updatePersonFts(db, pid);
+              for (const f of (full.filmography || []).filter((f) => f.mediaType === 'movie' && typeof f.tmdbId === 'number').slice(0, 10)) {
+                try {
+                  const mf = await tmdbGetMovieFull(f.tmdbId);
+                  if (isLikelyIndianMovie(mf)) upsertMovieFromTmdb(db, mf);
+                } catch { /* ignore */ }
+              }
+              importedNew = true;
+            } catch { /* ignore */ }
+          }
+        }
+        // Bust the cache so the next search re-runs locally and finds the imported actor.
+        if (importedNew) searchCache.delete(cacheKey);
+      } catch { /* ignore */ }
     });
     const data = { ...local, source: 'local' };
     searchCache.set(cacheKey, { data, ts: Date.now() });
