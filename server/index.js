@@ -5735,6 +5735,49 @@ if (fs.existsSync(DIST_DIR)) {
       res.sendFile(DIST_INDEX);
     }
   });
+
+  // Pre-warm the HTML cache for language/browse pages on startup and daily.
+  // Prevents the first visitor after a restart from paying the full render cost.
+  async function prewarmLanguagePages() {
+    if (!hasDistBuild()) return;
+    const template = fs.readFileSync(DIST_INDEX, 'utf-8');
+    const prewarmPaths = [
+      '/movies',
+      ...SUPPORTED_LANGUAGES.map((lang) => `/language/${toPathSlug(lang)}`)
+    ];
+    let warmed = 0;
+    for (const p of prewarmPaths) {
+      try {
+        const fakeReq = { path: p, headers: {}, query: {} };
+        const canonical = `${SITE_URL}${p}`;
+        const seo = await seoForPath(fakeReq, canonical, SITE_URL);
+        let out = template
+          .replaceAll('__CANONICAL_URL__', canonical)
+          .replaceAll('__SITE_URL__', SITE_URL);
+        out = setTitle(out, seo.title);
+        out = setMetaName(out, 'description', seo.description);
+        out = setMetaName(out, 'robots', seo.robots);
+        out = setLinkRel(out, 'canonical', canonical);
+        out = setMetaProp(out, 'og:url', canonical);
+        out = setMetaProp(out, 'og:type', seo.ogType);
+        out = setMetaProp(out, 'og:title', seo.title);
+        out = setMetaProp(out, 'og:description', seo.description);
+        out = setMetaProp(out, 'og:image', seo.ogImage);
+        out = setMetaName(out, 'twitter:title', seo.title);
+        out = setMetaName(out, 'twitter:description', seo.description);
+        out = setMetaName(out, 'twitter:image', seo.ogImage);
+        out = injectJsonLd(out, seo.jsonLd);
+        out = injectPrerender(out, seo.prerender);
+        out = injectInitialData(out, computeInitialData(fakeReq));
+        htmlCache.set(p, { html: out, ts: Date.now() });
+        warmed++;
+      } catch { /* best-effort; individual page failure must not abort the loop */ }
+    }
+    console.log(`[cache] Pre-warmed ${warmed}/${prewarmPaths.length} language/browse pages`);
+  }
+
+  setImmediate(() => prewarmLanguagePages().catch(() => {}));
+  setInterval(() => prewarmLanguagePages().catch(() => {}), 24 * 60 * 60 * 1000);
 }
 
 // Prune stale data on startup to keep the DB from growing unboundedly.
