@@ -4617,9 +4617,28 @@ app.get('/api/search', async (req, res) => {
   const local = searchLocal(db, q);
   if (local.movies.length || local.persons.length) {
     // Enrich top results in the background — don't block the response.
-    setImmediate(() => {
+    setImmediate(async () => {
       for (const m of local.movies.slice(0, 3)) {
         enrichMovieIfNeeded(m.id).catch(() => {});
+      }
+      // When a person is found but has few local movies, fetch more of their filmography
+      // from TMDB in the background so the next search shows a fuller picture.
+      if (local.persons.length && local.movies.length < 10) {
+        for (const person of local.persons) {
+          if (!person.tmdbId) continue;
+          try {
+            const full = await tmdbGetPersonFull(person.tmdbId);
+            const topMovies = (full.filmography || [])
+              .filter((f) => f.mediaType === 'movie' && typeof f.tmdbId === 'number')
+              .slice(0, 20);
+            for (const f of topMovies) {
+              try {
+                const movieFull = await tmdbGetMovieFull(f.tmdbId);
+                if (isLikelyIndianMovie(movieFull)) upsertMovieFromTmdb(db, movieFull);
+              } catch { /* ignore */ }
+            }
+          } catch { /* ignore */ }
+        }
       }
     });
     const data = { ...local, source: 'local' };
@@ -4754,10 +4773,10 @@ app.get('/api/search', async (req, res) => {
       updatePersonFts(db, personId);
       upsertedPersonIds.push(personId);
 
-      // Pull a few top filmography titles so "search by cast" returns movies too.
+      // Pull top filmography titles so "search by cast" returns movies too.
       const topMovies = (full.filmography || [])
         .filter((f) => f.mediaType === 'movie' && typeof f.tmdbId === 'number')
-        .slice(0, 5);
+        .slice(0, 15);
       for (const f of topMovies) {
         try {
           const movieFull = await tmdbGetMovieFull(f.tmdbId);

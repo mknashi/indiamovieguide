@@ -5,10 +5,34 @@ Modern, responsive React + Vite experience for discovering Indian movies (synops
 ## Quick start
 ```bash
 npm install
-npm run dev
+npm run dev (front end)
+npm run server:dev (back end)
 ```
 
 If you prefer Yarn or pnpm, adjust commands accordingly.
+
+## Deploy to Render (single service: API + frontend)
+This project is already wired for a single Node process:
+- `npm run build` builds the Vite frontend into `dist/`.
+- `npm start` runs `server/index.js`, which serves `/api/*` and the built SPA from `dist/`.
+
+Use the included blueprint:
+```bash
+# from project root
+render blueprint launch
+```
+
+Or configure a Render Web Service manually:
+- Build Command: `npm ci && npm run build`
+- Start Command: `npm start`
+- Health Check Path: `/api/health`
+- Add a persistent disk mounted at `/var/data` (at least 1 GB)
+- Set `DB_PATH=/var/data/indiamovieguide.sqlite`
+
+Minimum required env vars:
+- `TMDB_API_KEY` (or `TMDB_BEARER_TOKEN`)
+- `ADMIN_PASSWORD` (if using `/admin`)
+- `SITE_URL` (your Render/custom domain, for canonical/SEO links)
 
 ## Google Analytics (GA4)
 - Add your GA4 Measurement ID to `.env`:

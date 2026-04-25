@@ -420,8 +420,25 @@ export function searchLocal(db, q) {
           .map((r) => r.id)
       : [];
 
+    // When FTS found persons but no movies (e.g. phonetic person search like "shaha rukh khan"),
+    // look up their filmography so the caller gets both the actor and their movies.
+    let castMovieIds = [];
+    if (!indianMovieIds.length && ftsPersonIds.length) {
+      const inPh = ftsPersonIds.map(() => '?').join(',');
+      castMovieIds = db
+        .prepare(
+          `SELECT DISTINCT m.id FROM movies m
+           JOIN movie_cast mc ON mc.movie_id = m.id
+           WHERE COALESCE(m.is_indian, 1) = 1 AND mc.person_id IN (${inPh})
+           ORDER BY COALESCE(m.release_date, '0000-00-00') DESC LIMIT 50`
+        )
+        .all(...ftsPersonIds)
+        .map((r) => r.id);
+    }
+
+    const allMovieIds = indianMovieIds.length ? indianMovieIds : castMovieIds;
     return {
-      movies: indianMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
+      movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
       persons: ftsPersonIds.map((id) => hydratePerson(db, id)).filter(Boolean)
     };
   }
