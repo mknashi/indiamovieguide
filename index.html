@@ -33,10 +33,19 @@
     <link rel="canonical" href="__CANONICAL_URL__" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Load fonts asynchronously so they never block first paint. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;600&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;600&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <link rel="icon" type="image/svg+xml" href="/brand/india-movie-guide-icon.svg" />
     <title>IndiaMovieGuide — Indian Movies, Cast, Songs, Trailers</title>
 
@@ -62,6 +71,7 @@
         IndiaMovieGuide helps you discover Indian movies across languages, explore cast profiles, watch trailers, find where to stream, and play songs.
       </noscript>
     </div>
+    <!--__INITIAL_DATA__-->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

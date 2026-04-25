@@ -12,9 +12,26 @@ function formatDate(iso?: string) {
   return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Consume server-injected initial data once on module load.
+let _movieInitial: { key: string; movie: Movie } | null = null;
+if (typeof window !== 'undefined') {
+  const d = (window as any).__INITIAL_DATA__;
+  if (d?._route === 'movie') {
+    _movieInitial = { key: d._key, movie: d.movie as Movie };
+    delete (window as any).__INITIAL_DATA__;
+  }
+}
+
 export function MoviePage({ id }: { id: string }) {
-  const [movie, setMovie] = useState<Movie | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [movie, setMovie] = useState<Movie | null>(() => {
+    if (_movieInitial?.key === id) {
+      const m = _movieInitial.movie;
+      _movieInitial = null;
+      return m;
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(!movie);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<any>(null);
   const [lists, setLists] = useState<{ favorite: boolean; watchlist: boolean } | null>(null);
@@ -25,24 +42,23 @@ export function MoviePage({ id }: { id: string }) {
 
   useEffect(() => {
     let alive = true;
+    const hasInitial = !!movie;
+    if (!hasInitial) { setLoading(true); setError(null); }
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
-        // Load from the local DB first; the server will enrich missing fields opportunistically.
+        // Always fetch to pick up enriched ratings/streaming — but if we have initial
+        // data we skip the loading spinner so the page is visible immediately.
         const res = await fetch(`/api/movies/${encodeURIComponent(id)}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as Movie;
         if (alive) setMovie(data);
       } catch (e: any) {
-        if (alive) setError(e?.message || 'Failed to load movie');
+        if (alive && !hasInitial) setError(e?.message || 'Failed to load movie');
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [id]);
 
   // Lazy-load songs: movie details should render quickly, while songs/links refresh in the background.
@@ -160,10 +176,10 @@ export function MoviePage({ id }: { id: string }) {
         <span className="inline-pill">Movie</span>
       </div>
 
-      {loading && <div className="tagline">Loading…</div>}
+      {loading && !movie && <div className="tagline">Loading…</div>}
       {error && <div className="tagline">Failed to load: {error}</div>}
 
-      {!loading && movie && (
+      {movie && (
         <>
           <section className="movie-hero">
             <div

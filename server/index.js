@@ -381,6 +381,113 @@ function injectPrerender(html, prerenderHtml) {
   return html.replace(marker, prerenderHtml || '');
 }
 
+function injectInitialData(html, data) {
+  const marker = '<!--__INITIAL_DATA__-->';
+  if (!html.includes(marker)) return html;
+  if (!data) return html.replace(marker, '');
+  // Escape </script>, <!-- and & so the JSON cannot break out of the script tag.
+  const safe = JSON.stringify(data)
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e');
+  return html.replace(marker, `<script>window.__INITIAL_DATA__=${safe};</script>`);
+}
+
+// Compute the API-shaped data for the current request path so the client can
+// render without a loading state. Returns null for routes with no pre-fetchable data.
+function computeInitialData(req) {
+  try {
+    const path = req.path;
+    const PAGE_SIZE = 24;
+
+    // /language/:slug
+    const langMatch = path.match(/^\/language\/([^/]+)$/);
+    if (langMatch) {
+      const lang = resolveLanguageFromSlug(langMatch[1]);
+      const total = Number(
+        db.prepare(
+          `SELECT COUNT(*) as c FROM movies
+           WHERE COALESCE(is_indian,1)=1 AND (?='' OR lower(language)=lower(?))`
+        ).get(lang, lang)?.c || 0
+      );
+      const ids = db.prepare(
+        `SELECT id FROM movies
+         WHERE COALESCE(is_indian,1)=1 AND (?='' OR lower(language)=lower(?))
+         ORDER BY COALESCE(release_date,'0000-00-00') DESC LIMIT ?`
+      ).all(lang, lang, PAGE_SIZE).map((r) => r.id);
+      return {
+        _route: 'browse', _key: `language:${langMatch[1]}`,
+        movies: hydrateMoviesForBrowse(db, ids),
+        page: 1, pageSize: PAGE_SIZE, total, hasMore: total > PAGE_SIZE,
+      };
+    }
+
+    // /genre/:slug
+    const genreMatch = path.match(/^\/genre\/([^/]+)$/);
+    if (genreMatch) {
+      const genre = resolveGenreFromSlug(genreMatch[1]);
+      const total = Number(
+        db.prepare(
+          `SELECT COUNT(DISTINCT m.id) as c FROM movies m
+           JOIN movie_genres mg ON mg.movie_id=m.id
+           WHERE COALESCE(m.is_indian,1)=1 AND lower(mg.genre)=lower(?)`
+        ).get(genre)?.c || 0
+      );
+      const ids = db.prepare(
+        `SELECT DISTINCT m.id FROM movies m
+         JOIN movie_genres mg ON mg.movie_id=m.id
+         WHERE COALESCE(m.is_indian,1)=1 AND lower(mg.genre)=lower(?)
+         ORDER BY COALESCE(m.release_date,'0000-00-00') DESC LIMIT ?`
+      ).all(genre, PAGE_SIZE).map((r) => r.id);
+      return {
+        _route: 'browse', _key: `genre:${genreMatch[1]}`,
+        movies: hydrateMoviesForBrowse(db, ids),
+        page: 1, pageSize: PAGE_SIZE, total, hasMore: total > PAGE_SIZE,
+      };
+    }
+
+    // /movies
+    if (path === '/movies') {
+      const total = Number(
+        db.prepare(`SELECT COUNT(*) as c FROM movies WHERE COALESCE(is_indian,1)=1`).get()?.c || 0
+      );
+      const ids = db.prepare(
+        `SELECT id FROM movies WHERE COALESCE(is_indian,1)=1
+         ORDER BY COALESCE(release_date,'0000-00-00') DESC LIMIT ?`
+      ).all(PAGE_SIZE).map((r) => r.id);
+      return {
+        _route: 'browse', _key: 'all',
+        movies: hydrateMoviesForBrowse(db, ids),
+        page: 1, pageSize: PAGE_SIZE, total, hasMore: total > PAGE_SIZE,
+      };
+    }
+
+    // /movie/:id
+    const movieMatch = path.match(/^\/movie\/([^/]+)$/);
+    if (movieMatch) {
+      const raw = decodeURIComponent(movieMatch[1]);
+      const movieId = raw.includes(':') ? raw : makeId('tmdb-movie', raw);
+      const movie = hydrateMovie(db, movieId);
+      if (!movie) return null;
+      return { _route: 'movie', _key: raw, movie };
+    }
+
+    // /person/:id
+    const personMatch = path.match(/^\/person\/([^/]+)$/);
+    if (personMatch) {
+      const raw = decodeURIComponent(personMatch[1]);
+      const personId = raw.includes(':') ? raw : makeId('tmdb-person', raw);
+      const person = hydratePerson(db, personId);
+      if (!person) return null;
+      return { _route: 'person', _key: raw, person };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function toPathSlug(value) {
   return String(value || '')
     .normalize('NFKD')
@@ -5502,12 +5609,35 @@ if (fs.existsSync(DIST_DIR)) {
     })
   );
 
+  // In-memory HTML cache for public pages. Eliminates repeated DB queries for
+  // seoForPath + computeInitialData on every request. TTL: 60 seconds.
+  const htmlCache = new Map(); // cacheKey → { html, ts }
+  const HTML_CACHE_TTL = 60_000;
+  const isPublicCacheable = (req) => {
+    const p = req.path;
+    if (req.query.refresh || req.query.debug) return false;
+    return (
+      p === '/' || p === '/movies' || p === '/people' || p === '/streaming' ||
+      /^\/language\//.test(p) || /^\/genre\//.test(p) ||
+      /^\/movie\//.test(p) || /^\/person\//.test(p)
+    );
+  };
+
   app.get('*', async (req, res, next) => {
     if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api')) return next();
     if (!hasDistBuild()) return next();
-    res.setHeader('Cache-Control', 'no-store');
     try {
+      // Serve from cache for public pages — avoids recomputing SEO + initial data on every hit.
+      if (isPublicCacheable(req)) {
+        const cacheKey = req.path + (req.search || '');
+        const hit = htmlCache.get(cacheKey);
+        if (hit && Date.now() - hit.ts < HTML_CACHE_TTL) {
+          res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+          return res.status(200).send(hit.html);
+        }
+      }
+
       const html = fs.readFileSync(DIST_INDEX, 'utf-8');
       const canonical = canonicalUrlFor(req);
       const siteUrl = SITE_URL || canonical.replace(/\/+$/, '');
@@ -5531,8 +5661,18 @@ if (fs.existsSync(DIST_DIR)) {
       out = setMetaName(out, 'twitter:image', seo.ogImage);
       out = injectJsonLd(out, seo.jsonLd);
       out = injectPrerender(out, seo.prerender);
+      out = injectInitialData(out, computeInitialData(req));
+
+      if (isPublicCacheable(req)) {
+        const cacheKey = req.path + (req.search || '');
+        htmlCache.set(cacheKey, { html: out, ts: Date.now() });
+        res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      } else {
+        res.setHeader('Cache-Control', 'no-store');
+      }
       res.status(200).send(out);
     } catch {
+      res.setHeader('Cache-Control', 'no-store');
       res.sendFile(DIST_INDEX);
     }
   });

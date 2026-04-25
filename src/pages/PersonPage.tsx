@@ -3,30 +3,46 @@ import { RiArrowLeftLine, RiExternalLinkLine } from 'react-icons/ri';
 import { PersonProfile } from '../types/person';
 import { navigate } from '../router';
 
+// Consume server-injected initial data once on module load.
+let _personInitial: { key: string; person: PersonProfile } | null = null;
+if (typeof window !== 'undefined') {
+  const d = (window as any).__INITIAL_DATA__;
+  if (d?._route === 'person') {
+    _personInitial = { key: d._key, person: d.person as PersonProfile };
+    delete (window as any).__INITIAL_DATA__;
+  }
+}
+
 export function PersonPage({ id }: { id: string }) {
-  const [profile, setProfile] = useState<PersonProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<PersonProfile | null>(() => {
+    if (_personInitial?.key === id) {
+      const p = _personInitial.person;
+      _personInitial = null;
+      return p;
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(!profile);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    const hasInitial = !!profile;
+    if (!hasInitial) { setLoading(true); setError(null); }
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
+        // Always fetch — the API adds full TMDB filmography not in local DB.
         const res = await fetch(`/api/person/${encodeURIComponent(id)}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PersonProfile;
         if (alive) setProfile(data);
       } catch (e: any) {
-        if (alive) setError(e?.message || 'Failed to load profile');
+        if (alive && !hasInitial) setError(e?.message || 'Failed to load profile');
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [id]);
 
   const filmography = useMemo(() => {
@@ -44,10 +60,10 @@ export function PersonPage({ id }: { id: string }) {
         <span className="inline-pill">Profile</span>
       </div>
 
-      {loading && <div className="tagline">Loading…</div>}
+      {loading && !profile && <div className="tagline">Loading…</div>}
       {error && <div className="tagline">Failed to load: {error}</div>}
 
-      {!loading && profile && (
+      {profile && (
         <>
           <div className="hero person-hero">
             <div className="hero-card person-hero-card">

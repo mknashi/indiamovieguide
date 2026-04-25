@@ -12,26 +12,44 @@ type BrowsePayload = {
   pageSize: number;
   total: number;
   hasMore: boolean;
-  filters?: {
-    lang?: string | null;
-    genre?: string | null;
-  };
+  filters?: { lang?: string | null; genre?: string | null };
+  _route?: string;
+  _key?: string;
 };
 
-export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [payload, setPayload] = useState<BrowsePayload | null>(null);
+// Module-level cache so back-navigation and repeated tab-switching is instant.
+const browseCache = new Map<string, { data: BrowsePayload; ts: number }>();
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
+// Seed cache from server-injected initial data on first JS load.
+if (typeof window !== 'undefined') {
+  const d = (window as any).__INITIAL_DATA__;
+  if (d?._route === 'browse') {
+    browseCache.set(d._key, { data: d as BrowsePayload, ts: Date.now() });
+    delete (window as any).__INITIAL_DATA__;
+  }
+}
+
+function getCached(key: string): BrowsePayload | null {
+  const c = browseCache.get(key);
+  return c && Date.now() - c.ts < CACHE_TTL ? c.data : null;
+}
+
+export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
   const lang = useMemo(() => (mode === 'language' ? languageFromSlug(slug || '') : ''), [mode, slug]);
   const genreLabel = useMemo(() => (mode === 'genre' ? titleCaseLabel(slug || '') : ''), [mode, slug]);
+  const currentKey = mode === 'language' ? `language:${slug}` : mode === 'genre' ? `genre:${slug}` : 'all';
 
   const heading = useMemo(() => {
     if (mode === 'language') return `${lang || 'Language'} Movies`;
     if (mode === 'genre') return `${genreLabel || 'Genre'} Movies`;
     return 'Movie Index';
   }, [genreLabel, lang, mode]);
+
+  const [loading, setLoading] = useState(() => !getCached(currentKey));
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [payload, setPayload] = useState<BrowsePayload | null>(() => getCached(currentKey));
 
   const fetchPage = async (page: number) => {
     const params = new URLSearchParams();
@@ -45,7 +63,6 @@ export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
       params.set('genreSlug', slug);
       params.set('genre', decodeSlugLabel(slug));
     }
-
     const res = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -53,14 +70,23 @@ export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
   };
 
   useEffect(() => {
+    const cached = getCached(currentKey);
+    if (cached) {
+      setPayload(cached);
+      setLoading(false);
+      return;
+    }
+
     let alive = true;
     setLoading(true);
     setError(null);
+    setPayload(null);
 
     (async () => {
       try {
         const data = await fetchPage(1);
         if (!alive) return;
+        browseCache.set(currentKey, { data, ts: Date.now() });
         setPayload(data);
       } catch (e: any) {
         if (!alive) return;
@@ -70,10 +96,8 @@ export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
-  }, [mode, slug, lang]);
+    return () => { alive = false; };
+  }, [currentKey]);
 
   return (
     <div>
@@ -134,12 +158,13 @@ export function MoviesIndexPage({ mode, slug }: { mode: Mode; slug?: string }) {
                   try {
                     setLoadingMore(true);
                     const next = await fetchPage(nextPage);
+                    browseCache.set(currentKey, {
+                      data: { ...next, movies: [...(payload.movies || []), ...(next.movies || [])] },
+                      ts: Date.now(),
+                    });
                     setPayload((prev) => {
                       if (!prev) return next;
-                      return {
-                        ...next,
-                        movies: [...(prev.movies || []), ...(next.movies || [])]
-                      };
+                      return { ...next, movies: [...(prev.movies || []), ...(next.movies || [])] };
                     });
                   } catch {
                     // ignore
