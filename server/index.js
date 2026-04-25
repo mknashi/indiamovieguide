@@ -4769,20 +4769,22 @@ app.get('/api/search', async (req, res) => {
       // local DB yet. After import, bust the cache so the next request finds them.
       try {
         const ptHits = await tmdbSearchPerson(q).catch(() => []);
-        let importedNew = false;
+        let changed = false;
         for (const hit of ptHits.slice(0, 3)) {
           const pid = makeId('tmdb-person', hit.tmdbId);
-          if (!db.prepare('SELECT id FROM persons WHERE id = ?').get(pid)) {
+          const existing = db.prepare('SELECT id FROM persons WHERE id = ?').get(pid);
+          if (!existing) {
             try {
               const full = await tmdbGetPersonFull(hit.tmdbId);
               const ts = nowIso();
               db.prepare(
-                `INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+                `INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, tmdb_popularity, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, name_soundex=excluded.name_soundex, first_name_soundex=excluded.first_name_soundex,
-                   biography=excluded.biography, profile_image=excluded.profile_image, updated_at=excluded.updated_at`
-              ).run(pid, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography || '', full.profileImage || '', ts, ts);
+                   biography=excluded.biography, profile_image=excluded.profile_image,
+                   tmdb_popularity=excluded.tmdb_popularity, updated_at=excluded.updated_at`
+              ).run(pid, full.tmdbId, full.name, soundex(full.name), soundex(full.name.trim().split(/\s+/)[0] || full.name), full.biography || '', full.profileImage || '', full.popularity || 0, ts, ts);
               updatePersonFts(db, pid);
               for (const f of (full.filmography || []).filter((f) => f.mediaType === 'movie' && typeof f.tmdbId === 'number').slice(0, 10)) {
                 try {
@@ -4790,12 +4792,17 @@ app.get('/api/search', async (req, res) => {
                   if (isLikelyIndianMovie(mf)) upsertMovieFromTmdb(db, mf);
                 } catch { /* ignore */ }
               }
-              importedNew = true;
+              changed = true;
             } catch { /* ignore */ }
+          } else if (hit.popularity > 0) {
+            // Update popularity for existing persons so prominent actors rank above namesakes.
+            db.prepare('UPDATE persons SET tmdb_popularity = ?, updated_at = ? WHERE id = ? AND COALESCE(tmdb_popularity, 0) < ?')
+              .run(hit.popularity, nowIso(), pid, hit.popularity);
+            changed = true;
           }
         }
-        // Bust the cache so the next search re-runs locally and finds the imported actor.
-        if (importedNew) searchCache.delete(cacheKey);
+        // Bust the cache so the next search re-ranks with updated popularity scores.
+        if (changed) searchCache.delete(cacheKey);
       } catch { /* ignore */ }
     });
     const data = { ...local, source: 'local' };

@@ -231,6 +231,7 @@ export async function tmdbSearchPerson(query) {
   return (data.results || []).slice(0, 8).map((p) => ({
     tmdbId: p.id,
     name: p.name,
+    popularity: p.popularity || 0,
     profileImage: tmdbImageUrl(p.profile_path, 'w500'),
     knownFor: (p.known_for || []).map((k) => k.title || k.name).filter(Boolean)
   }));
@@ -257,6 +258,7 @@ export async function tmdbGetPersonFull(tmdbId) {
   return {
     tmdbId: details.id,
     name: details.name,
+    popularity: details.popularity || 0,
     biography: details.biography || '',
     profileImage: tmdbImageUrl(details.profile_path, 'w500'),
     knownForDepartment: details.known_for_department || '',

@@ -420,7 +420,8 @@ function searchPersonsByKeys(db, q) {
   const rows = db
     .prepare(
       `SELECT p.id, p.name,
-              COUNT(DISTINCT mc.movie_id) AS movie_count,
+              COALESCE(p.tmdb_popularity, 0) AS popularity,
+              COUNT(DISTINCT m.id) AS movie_count,
               CASE WHEN p.profile_image IS NOT NULL AND p.profile_image != '' THEN 1 ELSE 0 END AS has_image,
               CASE WHEN length(COALESCE(p.biography,'')) > 50 THEN 1 ELSE 0 END AS has_bio
        FROM person_search_keys psk
@@ -429,7 +430,7 @@ function searchPersonsByKeys(db, q) {
        LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian, 1) = 1
        WHERE psk.key IN (${ph})
        GROUP BY p.id
-       ORDER BY movie_count DESC, has_image DESC, has_bio DESC
+       ORDER BY popularity DESC, movie_count DESC, has_image DESC, has_bio DESC
        LIMIT 15`
     )
     .all(...keysArr);

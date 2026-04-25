@@ -380,6 +380,10 @@ export function migrate(db) {
     }
   }
 
+  // tmdb_popularity — TMDB's popularity score, used to rank famous actors above lesser-known
+  // namesakes (e.g. "Madhuri Dixit" above "Madhuri Jain" for the query "maduri").
+  try { db.exec('ALTER TABLE persons ADD COLUMN tmdb_popularity REAL DEFAULT 0'); } catch { /* already exists */ }
+
   // person_search_keys — pre-built index of every search variant for each actor.
   // Covers exact tokens, per-token soundex, compounds, and the Indian 'a'-bridge form
   // (e.g. "Raj Kumar" → stores "rajkumar" AND "rajakumar" so both queries match).
