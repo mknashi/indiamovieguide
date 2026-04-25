@@ -5612,7 +5612,7 @@ if (fs.existsSync(DIST_DIR)) {
   // In-memory HTML cache for public pages. Eliminates repeated DB queries for
   // seoForPath + computeInitialData on every request. TTL: 60 seconds.
   const htmlCache = new Map(); // cacheKey → { html, ts }
-  const HTML_CACHE_TTL = 60_000;
+  const HTML_CACHE_TTL = (Number(process.env.HTML_CACHE_TTL_MINUTES) || 30) * 60_000;
   const isPublicCacheable = (req) => {
     const p = req.path;
     if (req.query.refresh || req.query.debug) return false;
