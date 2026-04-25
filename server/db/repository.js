@@ -356,6 +356,29 @@ export function updatePersonWiki(db, personId, wiki) {
   ).run(hashId('attr', `${personId}:wikipedia`), 'person', personId, 'wikipedia', wiki.title || '', wiki.url || '', nowIso());
 }
 
+// Re-rank a list of person IDs by prominence: Indian movie count, then profile image, then bio.
+// Called after relevance filtering so we sort within already-relevant results.
+function rankPersonsByProminence(db, personIds) {
+  if (personIds.length <= 1) return personIds;
+  const inPh = personIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT p.id,
+              COUNT(DISTINCT mc.movie_id) AS movie_count,
+              CASE WHEN p.profile_image IS NOT NULL AND p.profile_image != '' THEN 1 ELSE 0 END AS has_image,
+              CASE WHEN length(COALESCE(p.biography,'')) > 50 THEN 1 ELSE 0 END AS has_bio
+       FROM persons p
+       LEFT JOIN movie_cast mc ON mc.person_id = p.id
+       LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
+       WHERE p.id IN (${inPh})
+       GROUP BY p.id
+       ORDER BY movie_count DESC, has_image DESC, has_bio DESC`
+    )
+    .all(...personIds);
+  const order = new Map(rows.map((r, i) => [r.id, i]));
+  return [...personIds].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
+}
+
 // Build a ranked list of FTS5 queries to try in order (most strict → most relaxed).
 // Returns [] if the query produces nothing usable.
 function buildFtsQueries(q) {
@@ -439,7 +462,7 @@ export function searchLocal(db, q) {
     const allMovieIds = indianMovieIds.length ? indianMovieIds : castMovieIds;
     return {
       movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
-      persons: ftsPersonIds.map((id) => hydratePerson(db, id)).filter(Boolean)
+      persons: rankPersonsByProminence(db, ftsPersonIds).map((id) => hydratePerson(db, id)).filter(Boolean)
     };
   }
 
@@ -477,14 +500,29 @@ export function searchLocal(db, q) {
   const indianOnly = `COALESCE(m.is_indian, 1) = 1`;
 
   const rawFuzzyPersons = db
-    .prepare(`SELECT * FROM persons WHERE name_soundex IN (${placeholders}) ORDER BY name ASC LIMIT 50`)
+    .prepare(
+      `SELECT p.*, COUNT(DISTINCT mc.movie_id) AS _movie_count
+       FROM persons p
+       LEFT JOIN movie_cast mc ON mc.person_id = p.id
+       LEFT JOIN movies m ON m.id = mc.movie_id AND COALESCE(m.is_indian,1) = 1
+       WHERE p.name_soundex IN (${placeholders})
+       GROUP BY p.id
+       ORDER BY p.name ASC LIMIT 50`
+    )
     .all(...codes);
 
   const personMinScore = qn.length < 8 ? 0.55 : qn.length < 14 ? 0.42 : 0.32;
   const fuzzyPersonRows = rawFuzzyPersons
     .map((p) => ({ ...p, _score: diceCoefficient(qn, p.name) }))
     .filter((p) => p._score >= personMinScore)
-    .sort((a, b) => b._score - a._score)
+    // Composite rank: dice relevance + logarithmic prominence bonus.
+    // log10(51)*0.05 ≈ 0.085, so a 50-film actor gains ~0.09 — enough to lift
+    // Madhuri Dixit above a no-film namesake without overriding a better name match.
+    .sort((a, b) => {
+      const sa = a._score + Math.log10(1 + (a._movie_count || 0)) * 0.05;
+      const sb = b._score + Math.log10(1 + (b._movie_count || 0)) * 0.05;
+      return sb - sa;
+    })
     .slice(0, 12);
 
   const fuzzyMoviesByCast = (() => {
