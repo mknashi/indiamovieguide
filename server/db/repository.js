@@ -398,6 +398,28 @@ function buildFtsQueries(q) {
 }
 
 export function searchLocal(db, q) {
+  const normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const diceCoefficient = (a, b) => {
+    const s1 = normalize(a);
+    const s2 = normalize(b);
+    if (!s1 || !s2) return 0;
+    if (s1 === s2) return 1;
+    if (s1.length < 2 || s2.length < 2) return 0;
+    const bigrams = (s) => {
+      const out = new Map();
+      for (let i = 0; i < s.length - 1; i++) {
+        const bg = s.slice(i, i + 2);
+        out.set(bg, (out.get(bg) || 0) + 1);
+      }
+      return out;
+    };
+    const b1 = bigrams(s1);
+    const b2 = bigrams(s2);
+    let intersect = 0;
+    for (const [bg, n] of b1.entries()) intersect += Math.min(n, b2.get(bg) || 0);
+    return (2 * intersect) / (s1.length - 1 + (s2.length - 1));
+  };
+
   // Phase 1: FTS5 — fast BM25-ranked full-text search.
   // Weights: title column (slot 2) = 10x, body column (slot 3) = 1x.
   // bm25() returns negative values; ORDER BY ascending = best match first.
@@ -427,7 +449,7 @@ export function searchLocal(db, q) {
           ftsPersonIds.push(h.entity_id);
         }
       }
-      if (ftsMovieIds.length >= 5 || ftsPersonIds.length >= 3) break;
+      if (ftsMovieIds.length >= 5 || ftsPersonIds.length >= 10) break;
     } catch {
       // Malformed FTS query (e.g. only stopwords) — try next tier.
     }
@@ -461,35 +483,32 @@ export function searchLocal(db, q) {
     }
 
     const allMovieIds = indianMovieIds.length ? indianMovieIds : castMovieIds;
+
+    // For short queries (1-2 tokens), FTS soundex tier can match many unrelated names.
+    // Apply a dice similarity filter so we only keep names that actually resemble the query,
+    // then prominence-rank the survivors and cap at 5.
+    const qn1 = normalize(q);
+    let filteredPersonIds = ftsPersonIds;
+    if (ftsPersonIds.length > 3 && qn1.split(/\s+/).filter(Boolean).length <= 2) {
+      const names = db
+        .prepare(`SELECT id, name FROM persons WHERE id IN (${ftsPersonIds.map(() => '?').join(',')})`)
+        .all(...ftsPersonIds);
+      const nameById = new Map(names.map((r) => [r.id, r.name]));
+      const minDice = qn1.length < 6 ? 0.35 : 0.45;
+      const scored = ftsPersonIds
+        .map((id) => ({ id, score: diceCoefficient(qn1, nameById.get(id) || '') }))
+        .filter((x) => x.score >= minDice)
+        .sort((a, b) => b.score - a.score);
+      filteredPersonIds = scored.length ? scored.map((x) => x.id) : ftsPersonIds.slice(0, 3);
+    }
+
     return {
       movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
-      persons: rankPersonsByProminence(db, ftsPersonIds).map((id) => hydratePerson(db, id)).filter(Boolean)
+      persons: rankPersonsByProminence(db, filteredPersonIds).slice(0, 5).map((id) => hydratePerson(db, id)).filter(Boolean)
     };
   }
 
   // Phase 2: Soundex phonetic fallback for complete misspellings not caught by FTS prefix matching.
-  const normalize = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const diceCoefficient = (a, b) => {
-    const s1 = normalize(a);
-    const s2 = normalize(b);
-    if (!s1 || !s2) return 0;
-    if (s1 === s2) return 1;
-    if (s1.length < 2 || s2.length < 2) return 0;
-    const bigrams = (s) => {
-      const out = new Map();
-      for (let i = 0; i < s.length - 1; i++) {
-        const bg = s.slice(i, i + 2);
-        out.set(bg, (out.get(bg) || 0) + 1);
-      }
-      return out;
-    };
-    const b1 = bigrams(s1);
-    const b2 = bigrams(s2);
-    let intersect = 0;
-    for (const [bg, n] of b1.entries()) intersect += Math.min(n, b2.get(bg) || 0);
-    return (2 * intersect) / (s1.length - 1 + (s2.length - 1));
-  };
-
   const qn = normalize(q);
   const tokens = qn.split(/\s+/g).filter((t) => t.length >= 4);
   const codes = Array.from(
