@@ -5672,6 +5672,8 @@ if (fs.existsSync(DIST_DIR)) {
   // seoForPath + computeInitialData on every request. TTL: 60 seconds.
   const htmlCache = new Map(); // cacheKey → { html, ts }
   const HTML_CACHE_TTL = (Number(process.env.HTML_CACHE_TTL_MINUTES) || 30) * 60_000;
+  // Paths that are pre-warmed on startup — eligible for long CDN caching (1 hour).
+  const prewarmedPaths = new Set();
   const isPublicCacheable = (req) => {
     const p = req.path;
     if (req.query.refresh || req.query.debug) return false;
@@ -5692,7 +5694,12 @@ if (fs.existsSync(DIST_DIR)) {
         const cacheKey = req.path + (req.search || '');
         const hit = htmlCache.get(cacheKey);
         if (hit && Date.now() - hit.ts < HTML_CACHE_TTL) {
-          res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+          // Pre-warmed language/browse pages get a 1-hour CDN cache so edge nodes
+          // (e.g. Cloudflare) serve them globally without hitting the origin.
+          const cc = prewarmedPaths.has(req.path)
+            ? 'public, max-age=3600, stale-while-revalidate=86400'
+            : 'public, max-age=30, stale-while-revalidate=60';
+          res.setHeader('Cache-Control', cc);
           return res.status(200).send(hit.html);
         }
       }
@@ -5770,6 +5777,7 @@ if (fs.existsSync(DIST_DIR)) {
         out = injectPrerender(out, seo.prerender);
         out = injectInitialData(out, computeInitialData(fakeReq));
         htmlCache.set(p, { html: out, ts: Date.now() });
+        prewarmedPaths.add(p);
         warmed++;
       } catch { /* best-effort; individual page failure must not abort the loop */ }
     }
