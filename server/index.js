@@ -446,6 +446,29 @@ function computeInitialData(req) {
       };
     }
 
+    // /streaming/:slug
+    const streamingSlugMatch = path.match(/^\/streaming\/([^/]+)$/);
+    if (streamingSlugMatch) {
+      const lang = resolveLanguageFromSlug(streamingSlugMatch[1]);
+      const PAGE_SIZE = 24;
+      const where = `FROM ott_offers o JOIN movies m ON m.id = o.movie_id
+        WHERE o.offer_type = 'Streaming' AND COALESCE(m.is_indian, 1) = 1
+        AND (? = '' OR lower(m.language) = lower(?))`;
+      const args = [lang, lang];
+      const total = Number(db.prepare(`SELECT COUNT(DISTINCT m.id) as c ${where}`).get(...args)?.c || 0);
+      const ids = db.prepare(`SELECT DISTINCT m.id ${where} ORDER BY m.release_date DESC LIMIT ?`).all(...args, PAGE_SIZE).map((r) => r.id);
+      const providerRows = db.prepare(`SELECT o.provider, COUNT(DISTINCT m.id) as count ${where} GROUP BY o.provider ORDER BY count DESC`).all(...args);
+      const lastVerifiedAt = db.prepare(`SELECT MAX(o.created_at) as t ${where}`).get(...args)?.t || null;
+      return {
+        _route: 'streaming', _key: `streaming:${streamingSlugMatch[1]}`,
+        movies: hydrateMoviesForBrowse(db, ids),
+        page: 1, pageSize: PAGE_SIZE, total, hasMore: total > PAGE_SIZE,
+        providers: providerRows.map((r) => ({ provider: r.provider, count: Number(r.count || 0) })),
+        filters: { lang, provider: null, genre: null, region: 'IN' },
+        generatedAt: nowIso(), lastVerifiedAt,
+      };
+    }
+
     // /movies
     if (path === '/movies') {
       const total = Number(
@@ -978,6 +1001,42 @@ async function seoForPath(req, canonical, siteUrl) {
       ogImage: ogDefault,
       robots: noIndex ? 'noindex,nofollow' : 'index,follow',
       jsonLd: json,
+      prerender: pre
+    };
+  }
+
+  const streamingLangMatch = path.match(/^\/streaming\/([^/]+)$/);
+  if (streamingLangMatch) {
+    const language = resolveLanguageFromSlug(streamingLangMatch[1]);
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT m.id FROM ott_offers o JOIN movies m ON m.id = o.movie_id
+         WHERE o.offer_type = 'Streaming' AND COALESCE(m.is_indian, 1) = 1
+           AND (? = '' OR lower(m.language) = lower(?))
+         ORDER BY m.release_date DESC LIMIT 30`
+      )
+      .all(language, language);
+    const total = Number(
+      db.prepare(
+        `SELECT COUNT(DISTINCT m.id) as c FROM ott_offers o JOIN movies m ON m.id = o.movie_id
+         WHERE o.offer_type = 'Streaming' AND COALESCE(m.is_indian, 1) = 1
+           AND (? = '' OR lower(m.language) = lower(?))`
+      ).get(language, language)?.c || 0
+    );
+    const desc = `Stream ${language} movies now on IndiaMovieGuide — browse titles available on Netflix, Prime Video, Hotstar and more.`;
+    const pre =
+      `<div style="padding:16px 20px;">` +
+      `<h1 style="margin:0 0 8px;font-size:24px;">Stream ${escapeHtml(language)} Movies</h1>` +
+      `<p style="margin:0 0 10px;color:#cbd5e1;">${escapeHtml(desc)}</p>` +
+      movieListHtml(rows.map((r) => hydrateMovie(db, r.id)).filter(Boolean), `No ${language} titles streaming yet.`) +
+      `</div>`;
+    return {
+      title: `${language} Movies Streaming Now (${total}) · IndiaMovieGuide`,
+      description: desc,
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: noIndex ? 'noindex,nofollow' : 'index,follow',
+      jsonLd: '',
       prerender: pre
     };
   }
@@ -5679,7 +5738,7 @@ if (fs.existsSync(DIST_DIR)) {
     if (req.query.refresh || req.query.debug) return false;
     return (
       p === '/' || p === '/movies' || p === '/people' || p === '/streaming' ||
-      /^\/language\//.test(p) || /^\/genre\//.test(p) ||
+      /^\/language\//.test(p) || /^\/streaming\//.test(p) || /^\/genre\//.test(p) ||
       /^\/movie\//.test(p) || /^\/person\//.test(p)
     );
   };
@@ -5750,7 +5809,8 @@ if (fs.existsSync(DIST_DIR)) {
     const template = fs.readFileSync(DIST_INDEX, 'utf-8');
     const prewarmPaths = [
       '/movies',
-      ...SUPPORTED_LANGUAGES.map((lang) => `/language/${toPathSlug(lang)}`)
+      ...SUPPORTED_LANGUAGES.map((lang) => `/language/${toPathSlug(lang)}`),
+      ...SUPPORTED_LANGUAGES.map((lang) => `/streaming/${toPathSlug(lang)}`)
     ];
     let warmed = 0;
     for (const p of prewarmPaths) {

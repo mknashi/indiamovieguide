@@ -4,6 +4,23 @@ import { Movie } from '../types';
 import { navigate } from '../router';
 import { MovieCard } from '../components/MovieCard';
 
+// Module-level cache so the initial server-injected data survives route changes.
+const streamingCache = new Map<string, { data: StreamingResponse; ts: number }>();
+const STREAMING_CACHE_TTL = 5 * 60 * 1000;
+
+if (typeof window !== 'undefined') {
+  const d = (window as any).__INITIAL_DATA__;
+  if (d?._route === 'streaming' && d._key) {
+    streamingCache.set(d._key, { data: d as StreamingResponse, ts: Date.now() });
+    delete (window as any).__INITIAL_DATA__;
+  }
+}
+
+function getStreamingCached(key: string): StreamingResponse | null {
+  const c = streamingCache.get(key);
+  return c && Date.now() - c.ts < STREAMING_CACHE_TTL ? c.data : null;
+}
+
 type ProviderFacet = { provider: string; count: number; logo?: string; lastVerifiedAt?: string };
 type StreamingResponse = {
   generatedAt: string;
@@ -40,10 +57,11 @@ const POPULAR_PROVIDERS = [
 ];
 
 export function StreamingPage({ lang, provider }: { lang?: string; provider?: string }) {
+  const cacheKey = `streaming:${(lang || 'all').toLowerCase()}`;
   const [activeProvider, setActiveProvider] = useState<string>(() => normalizeProvider(provider));
   const [page, setPage] = useState(1);
-  const [payload, setPayload] = useState<StreamingResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [payload, setPayload] = useState<StreamingResponse | null>(() => getStreamingCached(cacheKey));
+  const [loading, setLoading] = useState(() => !getStreamingCached(cacheKey));
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +102,12 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
   };
 
   useEffect(() => {
+    if (page === 1 && !activeProvider && getStreamingCached(cacheKey)) {
+      const cached = getStreamingCached(cacheKey)!;
+      setPayload(cached);
+      setLoading(false);
+      return;
+    }
     fetchPage('replace');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);

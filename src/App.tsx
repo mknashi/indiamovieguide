@@ -116,8 +116,11 @@ export default function App() {
 	                  navigate('/');
 	                  return;
 	                }
-	                const q = activeLang && activeLang !== 'All' ? `?lang=${encodeURIComponent(activeLang)}` : '';
-	                navigate(`/streaming${q}`);
+	                if (activeLang && activeLang !== 'All') {
+	                  navigate(`/streaming/${slugifySegment(activeLang)}`);
+	                } else {
+	                  navigate('/streaming');
+	                }
 	              }}
 	              title="Streaming now"
 	              aria-label="Streaming now"

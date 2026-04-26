@@ -1,4 +1,5 @@
 import type { MouseEvent } from 'react';
+import { languageFromSlug } from './utils/slugs';
 
 export type Route =
   | { name: 'home'; lang?: string; refresh?: boolean }
@@ -36,6 +37,9 @@ export function parseRoute(loc: Location = window.location): Route {
     const lang = params.get('lang') || undefined;
     const provider = params.get('provider') || undefined;
     return { name: 'streaming', ...(lang ? { lang } : {}), ...(provider ? { provider } : {}) };
+  }
+  if (parts[0] === 'streaming' && parts[1]) {
+    return { name: 'streaming', lang: languageFromSlug(parts[1]) || parts[1] };
   }
   if (path === '/movies') return { name: 'movies' };
   if (path === '/people') return { name: 'people' };
