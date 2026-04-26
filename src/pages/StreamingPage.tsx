@@ -3,6 +3,7 @@ import { RiInformationLine } from 'react-icons/ri';
 import { Movie } from '../types';
 import { navigate } from '../router';
 import { MovieCard } from '../components/MovieCard';
+import { slugifySegment } from '../utils/slugs';
 
 // Module-level cache so the initial server-injected data survives route changes.
 const streamingCache = new Map<string, { data: StreamingResponse; ts: number }>();
@@ -160,9 +161,7 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
             onClick={() => {
               setActiveProvider('');
               setPage(1);
-              const p = new URLSearchParams();
-              if (lang) p.set('lang', lang);
-              navigate(`/streaming${p.toString() ? `?${p.toString()}` : ''}`);
+              navigate(lang ? `/streaming/${slugifySegment(lang)}` : '/streaming');
             }}
             title="All platforms"
           >
@@ -178,9 +177,9 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
                 setActiveProvider(p.provider);
                 setPage(1);
                 const qs = new URLSearchParams();
-                if (lang) qs.set('lang', lang);
                 qs.set('provider', p.provider);
-                navigate(`/streaming?${qs.toString()}`);
+                const base = lang ? `/streaming/${slugifySegment(lang)}` : '/streaming';
+                navigate(`${base}?${qs.toString()}`);
               }}
               title={
                 p.lastVerifiedAt

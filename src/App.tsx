@@ -172,7 +172,7 @@ export default function App() {
 	                  if (l === 'All') {
 	                    url = isStreaming ? '/streaming' : '/';
 	                  } else if (isStreaming) {
-	                    url = `/streaming?lang=${encodeURIComponent(l)}`;
+	                    url = `/streaming/${slugifySegment(l)}`;
 	                  } else {
 	                    url = `/language/${slugifySegment(l)}`;
 	                  }
