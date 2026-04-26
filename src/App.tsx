@@ -244,28 +244,6 @@ export default function App() {
           </a>
           <span className="footer-sep">·</span>
           <a
-            href="/movies"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              navigate('/movies');
-            }}
-          >
-            Movies
-          </a>
-          <span className="footer-sep">·</span>
-          <a
-            href="/people"
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              navigate('/people');
-            }}
-          >
-            People
-          </a>
-          <span className="footer-sep">·</span>
-          <a
             href="/about"
             onClick={(e) => {
               if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

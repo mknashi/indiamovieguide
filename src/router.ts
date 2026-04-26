@@ -38,9 +38,6 @@ export function parseRoute(loc: Location = window.location): Route {
     const provider = params.get('provider') || undefined;
     return { name: 'streaming', ...(lang ? { lang } : {}), ...(provider ? { provider } : {}) };
   }
-  if (parts[0] === 'streaming' && parts[1]) {
-    return { name: 'streaming', lang: languageFromSlug(parts[1]) || parts[1] };
-  }
   if (path === '/movies') return { name: 'movies' };
   if (path === '/people') return { name: 'people' };
   if (path === '/search') {
@@ -62,6 +59,7 @@ export function parseRoute(loc: Location = window.location): Route {
   if (parts[0] === 'movie' && parts[1] && parts[2] === 'reviews') {
     return { name: 'movie_reviews', id: decodeURIComponent(parts[1]) };
   }
+  if (parts[0] === 'streaming' && parts[1]) return { name: 'streaming', lang: languageFromSlug(parts[1]) || parts[1] };
   if (parts[0] === 'language' && parts[1]) return { name: 'language', slug: decodeURIComponent(parts[1]) };
   if (parts[0] === 'genre' && parts[1]) return { name: 'genre', slug: decodeURIComponent(parts[1]) };
   if (parts[0] === 'movie' && parts[1]) return { name: 'movie', id: decodeURIComponent(parts[1]) };

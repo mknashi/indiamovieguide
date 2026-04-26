@@ -15,14 +15,23 @@ export function AboutPage() {
       <div className="detail" style={{ marginTop: 14 }}>
         <h4>IndiaMovieGuide</h4>
         <div className="tagline" style={{ lineHeight: 1.7 }}>
-          IndiaMovieGuide helps you discover Indian movies across languages with fast browsing, cast
-          profiles, trailers, songs, and where-to-watch links.
+          We are movie enthusiasts who are passionate about Indian cinema and bringing the latest,
+          most useful information to fellow fans. IndiaMovieGuide is your fast, no-fuss guide to
+          Indian movies across languages — from new releases and upcoming titles to cast profiles,
+          trailers, songs, ratings, and where to watch.
+        </div>
+        <div className="tagline" style={{ lineHeight: 1.7, marginTop: 10 }}>
+          Whether you follow Bollywood, Tollywood, Kollywood, or any other regional film industry,
+          we want IndiaMovieGuide to be the first place you check when you're curious about a movie
+          or an actor.
         </div>
 
         <div className="meta" style={{ marginTop: 12 }}>
           <span className="chip">New &amp; Upcoming</span>
           <span className="chip">Search by movie / cast / genre</span>
-          <span className="chip">Local cache + live enrichment</span>
+          <span className="chip">Trailers &amp; Songs</span>
+          <span className="chip">Streaming links</span>
+          <span className="chip">Cast profiles</span>
         </div>
 
         <div className="detail" style={{ marginTop: 14 }}>
