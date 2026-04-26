@@ -21,7 +21,7 @@ import { StreamingPage } from './pages/StreamingPage';
 import { MoviesIndexPage } from './pages/MoviesIndexPage';
 import { PeopleIndexPage } from './pages/PeopleIndexPage';
 import { initAnalytics, trackPageView } from './services/analytics';
-import { languageFromSlug } from './utils/slugs';
+import { languageFromSlug, slugifySegment } from './utils/slugs';
 
 const LANG_ORDER = [
   'All',
@@ -165,8 +165,14 @@ export default function App() {
 	                className={`filter ${activeLang === l ? 'active' : ''}`}
 	                onClick={() => {
 	                  const isStreaming = route.name === 'streaming';
-	                  const base = isStreaming ? '/streaming' : '/';
-	                  const url = l === 'All' ? base : `${base}?lang=${encodeURIComponent(l)}`;
+	                  let url: string;
+	                  if (l === 'All') {
+	                    url = isStreaming ? '/streaming' : '/';
+	                  } else if (isStreaming) {
+	                    url = `/streaming?lang=${encodeURIComponent(l)}`;
+	                  } else {
+	                    url = `/language/${slugifySegment(l)}`;
+	                  }
 	                  navigate(url);
 	                  window.scrollTo({ top: 0, behavior: 'smooth' });
 	                }}
