@@ -37,7 +37,7 @@ import {
 } from './providers/wikipedia.js';
 import { itunesFindSoundtrackForMovie } from './providers/itunes.js';
 import { motnGetDeepLinksForTmdbMovie } from './providers/motn.js';
-import { hashId, INDIAN_LANGUAGES_LOWER, makeId, normalizeForSearch, nowIso, soundex, statusFrom, toIsoDate } from './repo.js';
+import { hashId, INDIAN_LANGUAGES_LOWER, makeId, normalizeForSearch, nowIso, soundex, statusFrom } from './repo.js';
 import { omdbByTitle } from './providers/omdb.js';
 import {
   clearSessionCookie,
@@ -5697,7 +5697,7 @@ if (fs.existsSync(DIST_DIR)) {
           // Pre-warmed language/browse pages get a 1-hour CDN cache so edge nodes
           // (e.g. Cloudflare) serve them globally without hitting the origin.
           const cc = prewarmedPaths.has(req.path)
-            ? 'public, max-age=3600, stale-while-revalidate=86400'
+            ? 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400'
             : 'public, max-age=30, stale-while-revalidate=60';
           res.setHeader('Cache-Control', cc);
           return res.status(200).send(hit.html);
