@@ -446,6 +446,30 @@ function computeInitialData(req) {
       };
     }
 
+    // / (home — All languages)
+    if (path === '/') {
+      const today = new Date().toISOString().slice(0, 10);
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const newIds = db.prepare(
+        `SELECT id FROM movies WHERE release_date BETWEEN ? AND ? AND COALESCE(is_indian,1)=1 ORDER BY release_date DESC LIMIT 24`
+      ).all(sixtyDaysAgo, today).map((r) => r.id);
+      const upcomingIds = db.prepare(
+        `SELECT id FROM movies WHERE release_date > ? AND COALESCE(is_indian,1)=1 ORDER BY release_date ASC LIMIT 24`
+      ).all(today).map((r) => r.id);
+      const genres = db.prepare(
+        `SELECT mg.genre, COUNT(*) as c FROM movie_genres mg JOIN movies m ON m.id = mg.movie_id
+         WHERE COALESCE(m.is_indian,1)=1 GROUP BY mg.genre ORDER BY c DESC LIMIT 30`
+      ).all().map((r) => ({ genre: r.genre, count: Number(r.c || 0) }));
+      return {
+        _route: 'home', _key: 'home:all',
+        sections: {
+          new: hydrateMoviesForBrowse(db, newIds),
+          upcoming: hydrateMoviesForBrowse(db, upcomingIds)
+        },
+        categories: { genres }
+      };
+    }
+
     // /streaming/:slug
     const streamingSlugMatch = path.match(/^\/streaming\/([^/]+)$/);
     if (streamingSlugMatch) {
@@ -5808,6 +5832,7 @@ if (fs.existsSync(DIST_DIR)) {
     if (!hasDistBuild()) return;
     const template = fs.readFileSync(DIST_INDEX, 'utf-8');
     const prewarmPaths = [
+      '/',
       '/movies',
       ...SUPPORTED_LANGUAGES.map((lang) => `/language/${toPathSlug(lang)}`),
       ...SUPPORTED_LANGUAGES.map((lang) => `/streaming/${toPathSlug(lang)}`)

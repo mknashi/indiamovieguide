@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RiArrowRightUpLine } from 'react-icons/ri';
-import { fetchHome } from '../services/agent';
+import { fetchHome, HomePayload } from '../services/agent';
 import { Movie } from '../types';
 import { MovieCard } from '../components/MovieCard';
 import { navigate } from '../router';
@@ -11,11 +11,29 @@ type SpotlightGroup = {
   persons: { tmdbId: number; name: string; profileImage?: string }[];
 };
 
+// Module-level cache — seeded from server-injected __INITIAL_DATA__ on first load.
+const homeInitialCache = new Map<string, { data: HomePayload; ts: number }>();
+const HOME_INITIAL_TTL = 5 * 60 * 1000;
+
+if (typeof window !== 'undefined') {
+  const d = (window as any).__INITIAL_DATA__;
+  if (d?._route === 'home' && d._key) {
+    homeInitialCache.set(d._key, { data: d as HomePayload, ts: Date.now() });
+    delete (window as any).__INITIAL_DATA__;
+  }
+}
+
+function getHomeCached(key: string): HomePayload | null {
+  const c = homeInitialCache.get(key);
+  return c && Date.now() - c.ts < HOME_INITIAL_TTL ? c.data : null;
+}
+
 export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }) {
-  const [loading, setLoading] = useState(false);
-  const [homeNew, setHomeNew] = useState<Movie[]>([]);
-  const [homeUpcoming, setHomeUpcoming] = useState<Movie[]>([]);
-  const [genres, setGenres] = useState<{ genre: string; count: number }[]>([]);
+  const initialData = !lang && !refresh ? getHomeCached('home:all') : null;
+  const [loading, setLoading] = useState(!initialData);
+  const [homeNew, setHomeNew] = useState<Movie[]>(initialData?.sections?.new || []);
+  const [homeUpcoming, setHomeUpcoming] = useState<Movie[]>(initialData?.sections?.upcoming || []);
+  const [genres, setGenres] = useState<{ genre: string; count: number }[]>(initialData?.categories?.genres || []);
   const [spotlight, setSpotlight] = useState<SpotlightGroup[]>([]);
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const [genreMovies, setGenreMovies] = useState<Movie[]>([]);
@@ -24,14 +42,25 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
   const [genreTotal, setGenreTotal] = useState<number | null>(null);
 
   useEffect(() => {
+    setActiveGenre(null);
+    setGenreMovies([]);
+    setGenrePage(1);
+    setGenreHasMore(false);
+    setGenreTotal(null);
+
+    // Skip fetch if server-injected initial data covers this view.
+    if (!lang && !refresh && getHomeCached('home:all')) {
+      const cached = getHomeCached('home:all')!;
+      setHomeNew(cached.sections?.new || []);
+      setHomeUpcoming(cached.sections?.upcoming || []);
+      setGenres(cached.categories?.genres || []);
+      setLoading(false);
+      return;
+    }
+
     let alive = true;
     (async () => {
       setLoading(true);
-      setActiveGenre(null);
-      setGenreMovies([]);
-      setGenrePage(1);
-      setGenreHasMore(false);
-      setGenreTotal(null);
       try {
         const payload = await fetchHome(lang, { refresh: !!refresh });
         if (!alive) return;
