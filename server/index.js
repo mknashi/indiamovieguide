@@ -5739,17 +5739,26 @@ app.get('/sitemap.xml', (req, res) => {
 
 // Serve Vite build output for any non-API routes (SPA fallback).
 // Keep this near the end so API endpoints take priority.
-if (fs.existsSync(DIST_DIR)) {
-  app.use(
-    express.static(DIST_DIR, {
+// Static middleware is created lazily on first request so a missing dist/ at
+// startup time (e.g. a timing race during deploy) does not permanently break routing.
+let _staticMw = null;
+function getStaticMw() {
+  if (!_staticMw && fs.existsSync(DIST_DIR)) {
+    _staticMw = express.static(DIST_DIR, {
       index: false,
       maxAge: '365d',
       setHeaders: (res, filePath) => {
-        // Never aggressively cache HTML.
         if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
       }
-    })
-  );
+    });
+  }
+  return _staticMw;
+}
+app.use((req, res, next) => {
+  const mw = getStaticMw();
+  return mw ? mw(req, res, next) : next();
+});
+{
 
   // In-memory HTML cache for public pages. Eliminates repeated DB queries for
   // seoForPath + computeInitialData on every request. TTL: 60 seconds.
@@ -5770,7 +5779,10 @@ if (fs.existsSync(DIST_DIR)) {
   app.get('*', async (req, res, next) => {
     if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api')) return next();
-    if (!hasDistBuild()) return next();
+    if (!hasDistBuild()) {
+      res.setHeader('Retry-After', '15');
+      return res.status(503).send('Server is starting up, please retry in a moment.');
+    }
     try {
       // Serve from cache for public pages — avoids recomputing SEO + initial data on every hit.
       if (isPublicCacheable(req)) {
@@ -5916,7 +5928,9 @@ function pruneStaleData() {
   }
 }
 
-pruneStaleData();
+// Defer to avoid blocking app.listen() — the event loop must be free for the
+// health-check to pass before Render (or any PaaS) switches traffic over.
+setImmediate(() => pruneStaleData());
 
 app.post('/api/admin/db-vacuum', (req, res) => {
   const token = requireAdmin(req, res);
