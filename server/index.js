@@ -5792,8 +5792,8 @@ app.use((req, res, next) => {
           // Pre-warmed language/browse pages get a 1-hour CDN cache so edge nodes
           // (e.g. Cloudflare) serve them globally without hitting the origin.
           const cc = prewarmedPaths.has(req.path)
-            ? 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400'
-            : 'public, max-age=30, stale-while-revalidate=60';
+            ? 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400'
+            : 'public, max-age=30, stale-while-revalidate=60, stale-if-error=3600';
           res.setHeader('Cache-Control', cc);
           return res.status(200).send(hit.html);
         }
@@ -5827,7 +5827,7 @@ app.use((req, res, next) => {
       if (isPublicCacheable(req)) {
         const cacheKey = req.path + (req.search || '');
         htmlCache.set(cacheKey, { html: out, ts: Date.now() });
-        res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+        res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60, stale-if-error=3600');
       } else {
         res.setHeader('Cache-Control', 'no-store');
       }
@@ -5886,36 +5886,44 @@ app.use((req, res, next) => {
 }
 
 // Prune stale data on startup to keep the DB from growing unboundedly.
-// Runs fast targeted DELETEs — does not block startup.
-function pruneStaleData() {
+// Each heavy operation yields the event loop so health-check requests are never blocked.
+async function pruneStaleData() {
+  const yield_ = () => new Promise((r) => setImmediate(r));
   try {
     const nowIsoStr = new Date().toISOString();
 
     // 1. Truncate the WAL file — can free hundreds of MB with no extra disk needed.
+    await yield_();
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
 
     // 2. All api_cache entries (YouTube, Wikipedia). They re-warm on next request.
     //    Clearing all (not just expired) is the safest way to reclaim space fast.
+    await yield_();
     const cacheDeleted = db.prepare('DELETE FROM api_cache').run().changes;
 
     // 3. production_countries_json is only used to compute is_indian at ingest time.
     //    is_indian is already stored on each movie row so this blob is redundant.
+    await yield_();
     db.prepare('UPDATE movies SET production_countries_json = NULL WHERE production_countries_json IS NOT NULL').run();
 
     // 4. filmography_json on persons is re-fetched from TMDB on each person page visit.
+    await yield_();
     db.prepare('UPDATE persons SET filmography_json = NULL WHERE filmography_json IS NOT NULL').run();
 
     // 5. Expired user sessions and password reset tokens
+    await yield_();
     const sessDeleted = db.prepare('DELETE FROM user_sessions WHERE expires_at < ?').run(nowIsoStr).changes;
     const resetDeleted = db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(nowIsoStr).changes;
 
     // 6. Orphaned app_meta song/ott attempt keys for movies that no longer exist.
+    await yield_();
     const metaDeleted = db.prepare(`
       DELETE FROM app_meta
       WHERE (key LIKE 'last_song_%:%' OR key LIKE 'last_ott_%:%')
         AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM movies)
     `).run().changes;
 
+    await yield_();
     const pageSize = db.prepare('PRAGMA page_size').get().page_size;
     const freePages = db.prepare('PRAGMA freelist_count').get().freelist_count;
     const freeMB = ((pageSize * freePages) / 1024 / 1024).toFixed(1);
@@ -5928,9 +5936,9 @@ function pruneStaleData() {
   }
 }
 
-// Defer to avoid blocking app.listen() — the event loop must be free for the
-// health-check to pass before Render (or any PaaS) switches traffic over.
-setImmediate(() => pruneStaleData());
+// Delay 30s so Render's health checks pass before any heavy DB work runs.
+// Each operation inside also yields the event loop to stay non-blocking.
+setTimeout(() => pruneStaleData().catch(() => {}), 30_000);
 
 app.post('/api/admin/db-vacuum', (req, res) => {
   const token = requireAdmin(req, res);
