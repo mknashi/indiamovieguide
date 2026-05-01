@@ -5946,11 +5946,37 @@ app.post('/api/admin/db-vacuum', (req, res) => {
   }
 });
 
+// Catch unhandled promise rejections so a single bad TMDB call doesn't crash the process.
+process.on('unhandledRejection', (reason) => {
+  console.error('[error] Unhandled rejection:', reason instanceof Error ? reason.message : String(reason));
+});
+
 // Default to localhost for dev; bind to all interfaces in production hosting.
 const HOST = String(process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'));
-app.listen(PORT, HOST, () => {
+const httpServer = app.listen(PORT, HOST, () => {
   const cacheDir = path.join(process.cwd(), '.cache');
   fs.mkdirSync(cacheDir, { recursive: true });
   console.log(`Server listening on http://${HOST}:${PORT}`);
   if (hasDistBuild()) console.log(`Serving frontend from ${DIST_DIR}`);
 });
+
+// Graceful shutdown: let in-flight requests finish before Render kills the process.
+// Without this, every deploy causes active users to see a connection error.
+let isShuttingDown = false;
+function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[shutdown] ${signal} received — draining connections`);
+  // Stop accepting new HTTP connections.
+  httpServer.close(() => {
+    console.log('[shutdown] All connections closed — exiting');
+    process.exit(0);
+  });
+  // Force-exit after 20 s so a stuck request never delays the deploy indefinitely.
+  setTimeout(() => {
+    console.log('[shutdown] Forced exit after timeout');
+    process.exit(0);
+  }, 20_000).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

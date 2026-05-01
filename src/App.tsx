@@ -192,7 +192,7 @@ export default function App() {
 	        {route.name === 'home' && <HomePage lang={route.lang} refresh={route.refresh} />}
 	        {route.name === 'streaming' && <StreamingPage lang={route.lang} provider={route.provider} />}
 	        {route.name === 'movies' && <MoviesIndexPage mode="all" />}
-	        {route.name === 'language' && <MoviesIndexPage mode="language" slug={route.slug} />}
+	        {route.name === 'language' && <HomePage lang={languageFromSlug(route.slug)} />}
 	        {route.name === 'genre' && <MoviesIndexPage mode="genre" slug={route.slug} />}
 	        {route.name === 'people' && <PeopleIndexPage />}
 	        {route.name === 'search' && <SearchPage q={route.q} />}

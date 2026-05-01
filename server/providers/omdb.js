@@ -37,7 +37,7 @@ export async function omdbByTitle(title, year) {
   url.searchParams.set('type', 'movie');
   if (year) url.searchParams.set('y', String(year));
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`OMDb failed: ${res.status}`);
   const data = await res.json();
   if (!data || data.Response === 'False') return null;

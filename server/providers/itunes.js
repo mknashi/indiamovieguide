@@ -21,7 +21,7 @@ function tokenize(s) {
 }
 
 async function itunesFetch(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'indiamovieguide.com (local dev)' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'indiamovieguide.com (local dev)' }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`iTunes API failed: ${res.status}`);
   return await res.json();
 }

@@ -102,7 +102,7 @@ export async function youtubeSearch(query, opts = {}) {
 
   let res;
   try {
-    res = await fetch(url);
+    res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   } catch (e) {
     if (debug) console.log('[youtube] fetch failed', { message: e?.message || String(e) });
     throw e;

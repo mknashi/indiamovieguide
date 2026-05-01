@@ -40,7 +40,8 @@ async function tmdbFetch(pathname, params = {}) {
   if (!bearer && apiKey) url.searchParams.set('api_key', apiKey);
 
   const res = await fetch(url.toString(), {
-    headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined
+    headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+    signal: AbortSignal.timeout(10_000)
   });
   if (!res.ok) throw new Error(`TMDB ${pathname} failed: ${res.status} ${await res.text()}`);
   return await res.json();
