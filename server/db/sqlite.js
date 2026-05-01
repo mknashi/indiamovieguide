@@ -418,68 +418,56 @@ export function migrate(db) {
     console.error('[db] person_search_keys backfill error:', err.message);
   }
 
-  // Backfill for existing rows so filtering and "sounds-like" search work immediately.
-  try {
-    db.exec('BEGIN');
-    if (hasColumn('movies', 'title_soundex') && hasColumn('movies', 'is_indian')) {
-      const rows = db
-        .prepare('SELECT id, title, language, title_soundex, title_norm, is_indian, production_countries_json FROM movies')
-        .all();
-      const hasNorm = hasColumn('movies', 'title_norm');
-      const stmt = hasNorm
-        ? db.prepare('UPDATE movies SET title_soundex = ?, title_norm = ?, is_indian = ? WHERE id = ?')
-        : db.prepare('UPDATE movies SET title_soundex = ?, is_indian = ? WHERE id = ?');
-      for (const r of rows) {
-        const sx = r.title_soundex ? String(r.title_soundex) : '';
-        const norm = r.title_norm ? String(r.title_norm) : '';
-        const langLower = String(r.language || '').toLowerCase();
-        let prod = [];
-        try {
-          prod = r.production_countries_json ? JSON.parse(String(r.production_countries_json)) : [];
-        } catch {
-          prod = [];
+  // One-time backfill for soundex/norm/is_indian columns — version-gated so it
+  // only runs once instead of scanning every row on every boot.
+  const BACKFILL_V = '2';
+  const backfillRow = (() => {
+    try { return db.prepare("SELECT value FROM app_meta WHERE key = 'backfill_v'").get(); } catch { return null; }
+  })();
+  if (!backfillRow || backfillRow.value !== BACKFILL_V) {
+    try {
+      db.exec('BEGIN');
+      if (hasColumn('movies', 'title_soundex') && hasColumn('movies', 'is_indian')) {
+        const rows = db
+          .prepare('SELECT id, title, language, title_soundex, title_norm, is_indian, production_countries_json FROM movies')
+          .all();
+        const hasNorm = hasColumn('movies', 'title_norm');
+        const stmt = hasNorm
+          ? db.prepare('UPDATE movies SET title_soundex = ?, title_norm = ?, is_indian = ? WHERE id = ?')
+          : db.prepare('UPDATE movies SET title_soundex = ?, is_indian = ? WHERE id = ?');
+        for (const r of rows) {
+          const sx = r.title_soundex ? String(r.title_soundex) : '';
+          const norm = r.title_norm ? String(r.title_norm) : '';
+          const langLower = String(r.language || '').toLowerCase();
+          let prod = [];
+          try { prod = r.production_countries_json ? JSON.parse(String(r.production_countries_json)) : []; } catch { prod = []; }
+          const isIndian = Array.isArray(prod) && prod.includes('IN') ? 1 : (!langLower || INDIAN_LANGUAGES_LOWER.includes(langLower) ? 1 : 0);
+          if (hasNorm) {
+            stmt.run(sx || soundex(r.title), norm || normalizeForSearch(r.title), isIndian, r.id);
+          } else {
+            stmt.run(sx || soundex(r.title), isIndian, r.id);
+          }
         }
-        const isIndian =
-          Array.isArray(prod) && prod.includes('IN')
-            ? 1
-            : !langLower || INDIAN_LANGUAGES_LOWER.includes(langLower)
-              ? 1
-              : 0;
-
-        // Always set is_indian from the best available signal so we don't accidentally
-        // surface non-Indian titles that were cached earlier.
-        if (hasNorm) {
-          stmt.run(sx || soundex(r.title), norm || normalizeForSearch(r.title), isIndian, r.id);
-        } else {
-          stmt.run(sx || soundex(r.title), isIndian, r.id);
-        }
+        console.log(`[db] Backfilled soundex/norm/is_indian for ${rows.length} movies`);
       }
-    }
-
-    if (hasColumn('persons', 'name_soundex')) {
-      const rows = db.prepare('SELECT id, name, name_soundex FROM persons').all();
-      const stmt = db.prepare('UPDATE persons SET name_soundex = ? WHERE id = ?');
-      for (const r of rows) {
-        const sx = r.name_soundex ? String(r.name_soundex) : '';
-        if (!sx) stmt.run(soundex(r.name), r.id);
+      if (hasColumn('persons', 'name_soundex')) {
+        const rows = db.prepare('SELECT id, name, name_soundex FROM persons WHERE name_soundex IS NULL').all();
+        const stmt = db.prepare('UPDATE persons SET name_soundex = ? WHERE id = ?');
+        for (const r of rows) stmt.run(soundex(r.name), r.id);
       }
-    }
-    if (hasColumn('persons', 'first_name_soundex')) {
-      const rows = db.prepare('SELECT id, name, first_name_soundex FROM persons').all();
-      const stmt = db.prepare('UPDATE persons SET first_name_soundex = ? WHERE id = ?');
-      for (const r of rows) {
-        if (!r.first_name_soundex) {
+      if (hasColumn('persons', 'first_name_soundex')) {
+        const rows = db.prepare('SELECT id, name FROM persons WHERE first_name_soundex IS NULL').all();
+        const stmt = db.prepare('UPDATE persons SET first_name_soundex = ? WHERE id = ?');
+        for (const r of rows) {
           const firstName = String(r.name || '').trim().split(/\s+/)[0] || '';
           stmt.run(soundex(firstName), r.id);
         }
       }
-    }
-    db.exec('COMMIT');
-  } catch {
-    try {
-      db.exec('ROLLBACK');
-    } catch {
-      // ignore
+      db.prepare("INSERT OR REPLACE INTO app_meta(key, value, updated_at) VALUES ('backfill_v', ?, ?)").run(BACKFILL_V, new Date().toISOString());
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch { /* ignore */ }
+      console.error('[db] Backfill error:', err.message);
     }
   }
 }
