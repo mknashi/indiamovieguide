@@ -2613,6 +2613,12 @@ let lastHomeSeedAt = metaGetNumber('last_home_seed_at');
 
 const HOME_CACHE_TTL_MS = 30 * 1000;
 const homeCache = new Map(); // key -> { expiresAt: number, payload: any }
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of homeCache) {
+    if (v.expiresAt < now) homeCache.delete(k);
+  }
+}, 5 * 60_000).unref();
 function homeCacheKey(lang) {
   const l = String(lang || '').trim().toLowerCase();
   return l || '*';
@@ -4798,6 +4804,12 @@ app.get('/api/home', async (_req, res) => {
 // 30-second in-memory cache for search results to avoid repeated external calls.
 const searchCache = new Map();
 const SEARCH_CACHE_TTL_MS = 30 * 1000;
+setInterval(() => {
+  const cutoff = Date.now() - SEARCH_CACHE_TTL_MS;
+  for (const [k, v] of searchCache) {
+    if (v.ts < cutoff) searchCache.delete(k);
+  }
+}, 5 * 60_000).unref();
 
 app.get('/api/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
@@ -5764,6 +5776,7 @@ app.use((req, res, next) => {
   // seoForPath + computeInitialData on every request. TTL: 60 seconds.
   const htmlCache = new Map(); // cacheKey → { html, ts }
   const HTML_CACHE_TTL = (Number(process.env.HTML_CACHE_TTL_MINUTES) || 30) * 60_000;
+  const HTML_CACHE_MAX_ENTRIES = 500;
   // Paths that are pre-warmed on startup — eligible for long CDN caching (1 hour).
   const prewarmedPaths = new Set();
   const isPublicCacheable = (req) => {
@@ -5826,6 +5839,14 @@ app.use((req, res, next) => {
 
       if (isPublicCacheable(req)) {
         const cacheKey = req.path + (req.search || '');
+        if (htmlCache.size >= HTML_CACHE_MAX_ENTRIES) {
+          const evictCount = Math.ceil(HTML_CACHE_MAX_ENTRIES / 4);
+          let i = 0;
+          for (const k of htmlCache.keys()) {
+            if (i++ >= evictCount) break;
+            htmlCache.delete(k);
+          }
+        }
         htmlCache.set(cacheKey, { html: out, ts: Date.now() });
         res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60, stale-if-error=3600');
       } else {
@@ -5883,6 +5904,15 @@ app.use((req, res, next) => {
 
   setImmediate(() => prewarmLanguagePages().catch(() => {}));
   setInterval(() => prewarmLanguagePages().catch(() => {}), 24 * 60 * 60 * 1000);
+
+  // Sweep expired entries every 5 minutes — prevents stale HTML from accumulating
+  // across the 30-minute TTL window when cache misses never re-visit those paths.
+  setInterval(() => {
+    const cutoff = Date.now() - HTML_CACHE_TTL;
+    for (const [k, v] of htmlCache) {
+      if (v.ts < cutoff) htmlCache.delete(k);
+    }
+  }, 5 * 60_000).unref();
 }
 
 // Prune stale data on startup to keep the DB from growing unboundedly.
@@ -5939,6 +5969,7 @@ async function pruneStaleData() {
 // Delay 30s so Render's health checks pass before any heavy DB work runs.
 // Each operation inside also yields the event loop to stay non-blocking.
 setTimeout(() => pruneStaleData().catch(() => {}), 30_000);
+setInterval(() => pruneStaleData().catch(() => {}), 60 * 60_000);
 
 app.post('/api/admin/db-vacuum', (req, res) => {
   const token = requireAdmin(req, res);
