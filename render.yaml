@@ -18,8 +18,6 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=400
     disk:
       name: sqlite-data
       mountPath: /var/data
