@@ -80,7 +80,8 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
     let alive = true;
     (async () => {
       try {
-        const res = await fetch('/api/spotlight', { cache: 'no-store' });
+        const url = lang ? `/api/spotlight?lang=${encodeURIComponent(lang)}` : '/api/spotlight';
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         if (!alive) return;
@@ -92,7 +93,7 @@ export function HomePage({ lang, refresh }: { lang?: string; refresh?: boolean }
     return () => {
       alive = false;
     };
-  }, []);
+  }, [lang]);
 
   const newSorted = useMemo(() => {
     return homeNew.slice().sort((a, b) => {

@@ -3601,73 +3601,77 @@ app.get('/api/me/person-submissions', (req, res) => {
   res.json({ personSubmissions: rows });
 });
 
-app.get('/api/spotlight', async (_req, res) => {
-  // Curated "popular actors" request: return a small set of well-known names with images,
-  // resolved via TMDB search (server-side key).
+app.get('/api/spotlight', async (req, res) => {
+  // Curated "popular actors" per language industry. All/Hindi pages default to Bollywood.
   const curated = {
-    Hindi: ['Shah Rukh Khan', 'Deepika Padukone', 'Amitabh Bachchan', 'Alia Bhatt'],
-    Kannada: ['Yash', 'Sudeep', 'Rakshit Shetty', 'Rashmika Mandanna'],
-    Telugu: ['Prabhas', 'Allu Arjun', 'Mahesh Babu', 'N. T. Rama Rao Jr.']
+    Hindi:     ['Shah Rukh Khan', 'Deepika Padukone', 'Amitabh Bachchan', 'Alia Bhatt', 'Ranveer Singh', 'Hrithik Roshan', 'Salman Khan', 'Akshay Kumar', 'Kareena Kapoor'],
+    Kannada:   ['Yash', 'Sudeep', 'Rakshit Shetty', 'Rashmika Mandanna', 'Darshan', 'Puneeth Rajkumar', 'Shiva Rajkumar', 'Upendra', 'Dhananjay'],
+    Telugu:    ['Prabhas', 'Allu Arjun', 'Mahesh Babu', 'N. T. Rama Rao Jr.', 'Ram Charan', 'Vijay Deverakonda', 'Samantha Ruth Prabhu', 'Chiranjeevi', 'Ravi Teja'],
+    Tamil:     ['Rajinikanth', 'Vijay', 'Ajith Kumar', 'Kamal Haasan', 'Vijay Sethupathi', 'Suriya', 'Dhanush', 'Sivakarthikeyan', 'Nayanthara'],
+    Malayalam: ['Mohanlal', 'Mammootty', 'Dulquer Salmaan', 'Fahadh Faasil', 'Tovino Thomas', 'Prithviraj Sukumaran', 'Nivin Pauly', 'Asif Ali', 'Jayasurya'],
+    Marathi:   ['Nana Patekar', 'Subodh Bhave', 'Ankush Chaudhari', 'Swapnil Joshi', 'Sai Tamhankar', 'Amruta Khanvilkar', 'Sonali Kulkarni', 'Makrand Anaspure', 'Sayali Sanjeev'],
+    Bengali:   ['Prosenjit Chatterjee', 'Dev', 'Jeet', 'Srabanti Chatterjee', 'Ritwick Chakraborty', 'Parambrata Chattopadhyay', 'Nusrat Jahan', 'Mimi Chakraborty', 'Soham Chakraborty'],
+    Punjabi:   ['Diljit Dosanjh', 'Ammy Virk', 'Gurnam Bhullar', 'Sargun Mehta', 'Neeru Bajwa', 'Sippy Gill', 'Binnu Dhillon', 'Harish Verma', 'Wamiqa Gabbi'],
   };
 
-  const groups = [];
-  for (const [language, names] of Object.entries(curated)) {
-    const persons = [];
-    for (const name of names) {
-      try {
-        const hits = await tmdbSearchPerson(name);
-        const hit = hits?.[0];
-        if (!hit?.tmdbId) {
-          console.warn(`[spotlight] TMDB returned no results for "${name}"`);
-          continue;
-        }
+  const langParam = String(req.query.lang || '').trim();
+  const targetLang = Object.keys(curated).find(
+    (k) => k.toLowerCase() === langParam.toLowerCase()
+  ) || 'Hindi';
 
-        const personId = makeId('tmdb-person', hit.tmdbId);
-        const ts = nowIso();
-        db.prepare(
-          `
-          INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, COALESCE((SELECT biography FROM persons WHERE id = ?), ''), COALESCE((SELECT wiki_url FROM persons WHERE id = ?), ''), COALESCE(?, COALESCE((SELECT profile_image FROM persons WHERE id = ?), '')), ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            name=excluded.name,
-            name_soundex=excluded.name_soundex,
-            first_name_soundex=excluded.first_name_soundex,
-            profile_image=CASE WHEN excluded.profile_image != '' THEN excluded.profile_image ELSE persons.profile_image END,
-            updated_at=excluded.updated_at
+  const persons = [];
+  for (const name of curated[targetLang]) {
+    try {
+      const hits = await tmdbSearchPerson(name);
+      const hit = hits?.[0];
+      if (!hit?.tmdbId) {
+        console.warn(`[spotlight] TMDB returned no results for "${name}"`);
+        continue;
+      }
+
+      const personId = makeId('tmdb-person', hit.tmdbId);
+      const ts = nowIso();
+      db.prepare(
         `
-        ).run(
-          personId,
-          hit.tmdbId,
-          hit.name,
-          soundex(hit.name),
-          soundex(hit.name.trim().split(/\s+/)[0] || hit.name),
-          personId,
-          personId,
-          hit.profileImage || '',
-          personId,
-          ts,
-          ts
-        );
+        INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, COALESCE((SELECT biography FROM persons WHERE id = ?), ''), COALESCE((SELECT wiki_url FROM persons WHERE id = ?), ''), COALESCE(?, COALESCE((SELECT profile_image FROM persons WHERE id = ?), '')), ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name,
+          name_soundex=excluded.name_soundex,
+          first_name_soundex=excluded.first_name_soundex,
+          profile_image=CASE WHEN excluded.profile_image != '' THEN excluded.profile_image ELSE persons.profile_image END,
+          updated_at=excluded.updated_at
+      `
+      ).run(
+        personId,
+        hit.tmdbId,
+        hit.name,
+        soundex(hit.name),
+        soundex(hit.name.trim().split(/\s+/)[0] || hit.name),
+        personId,
+        personId,
+        hit.profileImage || '',
+        personId,
+        ts,
+        ts
+      );
 
-        persons.push({ tmdbId: hit.tmdbId, name: hit.name, profileImage: hit.profileImage });
-      } catch (err) {
-        console.error(`[spotlight] TMDB fetch failed for "${name}":`, err.message);
-        // Fallback: use cached record from local DB if available
-        const cached = db.prepare(
-          `SELECT tmdb_id, name, profile_image FROM persons WHERE name = ? AND profile_image != '' LIMIT 1`
-        ).get(name);
-        if (cached) {
-          console.log(`[spotlight] Using cached DB record for "${name}"`);
-          persons.push({ tmdbId: cached.tmdb_id, name: cached.name, profileImage: cached.profile_image });
-        } else {
-          console.warn(`[spotlight] No cached record found for "${name}", skipping`);
-        }
+      persons.push({ tmdbId: hit.tmdbId, name: hit.name, profileImage: hit.profileImage });
+    } catch (err) {
+      console.error(`[spotlight] TMDB fetch failed for "${name}":`, err.message);
+      const cached = db.prepare(
+        `SELECT tmdb_id, name, profile_image FROM persons WHERE name = ? AND profile_image != '' LIMIT 1`
+      ).get(name);
+      if (cached) {
+        console.log(`[spotlight] Using cached DB record for "${name}"`);
+        persons.push({ tmdbId: cached.tmdb_id, name: cached.name, profileImage: cached.profile_image });
+      } else {
+        console.warn(`[spotlight] No cached record found for "${name}", skipping`);
       }
     }
-    groups.push({ language, persons });
   }
 
-  res.json({ generatedAt: nowIso(), groups });
+  res.json({ generatedAt: nowIso(), groups: [{ language: targetLang, persons }] });
 });
 
 app.post('/api/admin/login', (req, res) => {
