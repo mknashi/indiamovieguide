@@ -105,7 +105,34 @@ export function PersonPage({ id }: { id: string }) {
                   </div>
                   <div className="detail" style={{ marginTop: 12 }}>
                     <h4>Bio</h4>
-                    <div className="tagline">{profile.biography || 'Biography not available yet.'}</div>
+                    {filmography.length > 0 && (
+                      <div className="meta" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+                        <span className="tagline" style={{ alignSelf: 'center', marginRight: 2 }}>Known for</span>
+                        {filmography.slice(0, 3).map((f) => {
+                          const year = (f.releaseDate || '').toString().slice(0, 4);
+                          return (
+                            <button
+                              key={`${f.title}-${year}`}
+                              className="chip"
+                              type="button"
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                if (typeof f.tmdbId === 'number') {
+                                  navigate(`/movie/${encodeURIComponent(String(f.tmdbId))}`);
+                                } else {
+                                  navigate(`/search?q=${encodeURIComponent(f.title)}`);
+                                }
+                              }}
+                            >
+                              {f.title}{year ? ` (${year})` : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="tagline">
+                      {profile.biography?.trim() || 'Full biography not available yet.'}
+                    </div>
                   </div>
                 </div>
               </div>

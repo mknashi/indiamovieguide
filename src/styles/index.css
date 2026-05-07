@@ -13,13 +13,25 @@
   --border: rgba(255, 255, 255, 0.08);
   --card-radius: 18px;
   color-scheme: dark;
-  font-family: 'Space Grotesk', 'Manrope', system-ui, -apple-system, sans-serif;
+  /* Option D: DM Sans — warm, modern */
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* Option A: Barlow Condensed for headings — tighter, cinematic
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Barlow Condensed', 'Barlow', system-ui, sans-serif;
+  letter-spacing: 0.01em;
+} */
+/* Option B: Rajdhani headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Rajdhani', system-ui, sans-serif;
+  letter-spacing: 0.02em;
 }
 
 body {
@@ -110,6 +122,11 @@ a {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .icon-button.active {
@@ -213,6 +230,12 @@ a {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+@media (min-width: 600px) {
+  .featured-poster {
+    display: block !important;
+  }
+}
+
 .hero h1 {
   margin: 0 0 12px;
   font-size: clamp(28px, 5vw, 38px);
@@ -238,6 +261,14 @@ a {
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 13px;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.badge:hover {
+  background: var(--panel-strong);
+  border-color: var(--brand-gold);
+  color: var(--brand-gold);
+  transform: translateY(-1px);
 }
 
 .search {
@@ -307,6 +338,11 @@ a {
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
+}
+
+.filter:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
 }
 
 .filter.active {
@@ -505,6 +541,13 @@ a {
   display: flex;
   flex-direction: column;
   height: 610px; /* keep movie boxes consistent */
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.55);
+  border-color: rgba(243, 167, 18, 0.35);
 }
 
 .admin-card {
@@ -670,6 +713,16 @@ button.detail {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 16px;
   border: 1px solid var(--border);
+}
+
+.star-power-grid a.detail {
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.star-power-grid a.detail:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.20);
+  transform: translateY(-2px);
 }
 
 .detail h4 {

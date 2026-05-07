@@ -8,6 +8,16 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom'],
+            'icons': ['react-icons'],
+          },
+        },
+      },
+    },
     server: {
       port: 5173,
       proxy: {

@@ -150,7 +150,7 @@ export function AdminPanel({
   const [token, setToken] = useState<string>(() => localStorage.getItem('img_admin_token') || '');
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
-  const [tab, setTab] = useState<'overview' | 'seeding' | 'catalog' | 'moderation' | 'ingestion'>('overview');
+  const [tab, setTab] = useState<'overview' | 'seeding' | 'catalog' | 'moderation' | 'ingestion' | 'featured'>('overview');
   const [seedLang, setSeedLang] = useState<string>('Hindi');
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
   const [backfillScope, setBackfillScope] = useState<'all' | 'language'>('all');
@@ -203,6 +203,11 @@ export function AdminPanel({
   const [incompleteMovies, setIncompleteMovies] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [featuredLang, setFeaturedLang] = useState<string>('all');
+  const [featuredSearchQ, setFeaturedSearchQ] = useState('');
+  const [featuredSearchResults, setFeaturedSearchResults] = useState<any[]>([]);
+  const [featuredCurrent, setFeaturedCurrent] = useState<Record<string, any>>({});
+  const [featuredMsg, setFeaturedMsg] = useState<string | null>(null);
 
   const loggedIn = !!token;
 
@@ -487,7 +492,7 @@ export function AdminPanel({
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-                  {(['overview', 'seeding', 'catalog', 'moderation', 'ingestion'] as const).map((t) => (
+                  {(['overview', 'seeding', 'catalog', 'moderation', 'ingestion', 'featured'] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -2214,6 +2219,221 @@ export function AdminPanel({
                     No pending submissions.
                   </div>
                 )}
+                  </div>
+                </>
+              ) : null}
+
+              {tab === 'featured' ? (
+                <>
+                  <div className="section-header">
+                    <h3>Featured Movie</h3>
+                    <span className="inline-pill">Per language</span>
+                  </div>
+
+                  <div className="detail" style={{ marginTop: 12 }}>
+                    <div className="tagline" style={{ marginBottom: 14 }}>
+                      Set a featured movie banner shown on the home page. Pick a language (or "All" as a fallback) then search by title or paste a movie ID.
+                    </div>
+
+                    {/* Language selector */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div className="tagline" style={{ marginBottom: 6 }}>Language</div>
+                      <div className="meta" style={{ flexWrap: 'wrap' }}>
+                        {(['all', ...ADMIN_LANGUAGE_OPTIONS] as const).map((l) => (
+                          <button
+                            key={l}
+                            type="button"
+                            className={`filter ${featuredLang === l ? 'active' : ''}`}
+                            onClick={() => {
+                              setFeaturedLang(l);
+                              setFeaturedSearchResults([]);
+                              setFeaturedSearchQ('');
+                              setFeaturedMsg(null);
+                            }}
+                          >
+                            {l === 'all' ? 'All (fallback)' : l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Current featured for selected lang */}
+                    {featuredCurrent[featuredLang] ? (
+                      <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {featuredCurrent[featuredLang].poster && (
+                          <img
+                            src={featuredCurrent[featuredLang].poster}
+                            alt=""
+                            style={{ width: 40, height: 60, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }}
+                          />
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{featuredCurrent[featuredLang].title}</div>
+                          <div className="tagline" style={{ fontSize: 12 }}>
+                            {featuredCurrent[featuredLang].language} · ID: {featuredCurrent[featuredLang].id}
+                          </div>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          style={{ marginLeft: 'auto' }}
+                          onClick={async () => {
+                            if (!token) return;
+                            try {
+                              await fetch(`/api/admin/featured/${encodeURIComponent(featuredLang)}`, {
+                                method: 'DELETE',
+                                headers: { 'x-admin-token': token },
+                              });
+                              setFeaturedCurrent((prev) => { const n = { ...prev }; delete n[featuredLang]; return n; });
+                              setFeaturedMsg('Cleared.');
+                            } catch (e: any) {
+                              setFeaturedMsg(`Error: ${e.message}`);
+                            }
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="tagline" style={{ marginBottom: 14, fontSize: 12 }}>
+                        No featured movie set for <strong>{featuredLang === 'all' ? 'All (fallback)' : featuredLang}</strong>.
+                      </div>
+                    )}
+
+                    {/* Load current button */}
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      style={{ marginBottom: 14 }}
+                      onClick={async () => {
+                        if (!token) return;
+                        try {
+                          const langs = ['all', ...ADMIN_LANGUAGE_OPTIONS];
+                          const results = await Promise.all(
+                            langs.map((l) =>
+                              fetch(l === 'all' ? '/api/featured' : `/api/featured?lang=${encodeURIComponent(l)}`, { cache: 'no-store' })
+                                .then((r) => r.json())
+                                .then((d) => ({ lang: l, movie: d.featured }))
+                                .catch(() => ({ lang: l, movie: null }))
+                            )
+                          );
+                          const map: Record<string, any> = {};
+                          results.forEach(({ lang: l, movie }) => { if (movie) map[l] = movie; });
+                          setFeaturedCurrent(map);
+                          setFeaturedMsg('Loaded current featured movies.');
+                        } catch (e: any) {
+                          setFeaturedMsg(`Error: ${e.message}`);
+                        }
+                      }}
+                    >
+                      <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}><RiRefreshLine /></span>
+                      Load current
+                    </button>
+
+                    {/* Search */}
+                    <div className="tagline" style={{ marginBottom: 6 }}>Search movie by title or paste ID</div>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                      <input
+                        className="filter"
+                        style={{ flex: 1, padding: '6px 12px' }}
+                        placeholder="e.g. KGF or tmdb-movie:123456"
+                        value={featuredSearchQ}
+                        onChange={(e) => setFeaturedSearchQ(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key !== 'Enter' || !token) return;
+                          const q = featuredSearchQ.trim();
+                          if (!q) return;
+                          try {
+                            const res = await fetch(`/api/admin/movies-search?q=${encodeURIComponent(q)}`, {
+                              headers: { 'x-admin-token': token },
+                              cache: 'no-store',
+                            });
+                            const data = await res.json();
+                            setFeaturedSearchResults(Array.isArray(data.movies) ? data.movies : []);
+                          } catch (e: any) {
+                            setFeaturedMsg(`Search error: ${e.message}`);
+                          }
+                        }}
+                      />
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={async () => {
+                          if (!token) return;
+                          const q = featuredSearchQ.trim();
+                          if (!q) return;
+                          try {
+                            const res = await fetch(`/api/admin/movies-search?q=${encodeURIComponent(q)}`, {
+                              headers: { 'x-admin-token': token },
+                              cache: 'no-store',
+                            });
+                            const data = await res.json();
+                            setFeaturedSearchResults(Array.isArray(data.movies) ? data.movies : []);
+                          } catch (e: any) {
+                            setFeaturedMsg(`Search error: ${e.message}`);
+                          }
+                        }}
+                      >
+                        Search
+                      </button>
+                    </div>
+
+                    {/* Search results */}
+                    {featuredSearchResults.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                        {featuredSearchResults.slice(0, 8).map((m) => (
+                          <div
+                            key={m.id}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                          >
+                            {m.poster && (
+                              <img
+                                src={m.poster}
+                                alt=""
+                                style={{ width: 32, height: 48, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--border)', flexShrink: 0 }}
+                              />
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{m.title}</div>
+                              <div className="tagline" style={{ fontSize: 11 }}>
+                                {m.language} · {m.releaseDate ? new Date(m.releaseDate).getFullYear() : '—'} · {m.id}
+                              </div>
+                            </div>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={async () => {
+                                if (!token) return;
+                                setFeaturedMsg(null);
+                                try {
+                                  const res = await fetch('/api/admin/featured', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
+                                    body: JSON.stringify({ lang: featuredLang === 'all' ? '' : featuredLang, movieId: m.id }),
+                                  });
+                                  const data = await res.json();
+                                  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                                  setFeaturedCurrent((prev) => ({ ...prev, [featuredLang]: m }));
+                                  setFeaturedSearchResults([]);
+                                  setFeaturedSearchQ('');
+                                  setFeaturedMsg(`Set "${data.title}" as featured for ${featuredLang === 'all' ? 'All languages' : featuredLang}.`);
+                                } catch (e: any) {
+                                  setFeaturedMsg(`Error: ${e.message}`);
+                                }
+                              }}
+                            >
+                              Set featured
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {featuredMsg && (
+                      <div className="tagline" style={{ marginTop: 8, color: featuredMsg.startsWith('Error') ? '#f87171' : 'var(--accent)' }}>
+                        {featuredMsg}
+                      </div>
+                    )}
                   </div>
                 </>
               ) : null}

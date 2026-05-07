@@ -66,6 +66,21 @@ export function PeopleIndexPage() {
         <span className="inline-pill">People</span>
       </div>
 
+      <div className="detail" style={{ marginTop: 14 }}>
+        <div className="tagline" style={{ lineHeight: 1.8 }}>
+          Indian cinema's stars are as important as its stories — fan loyalty to individual actors
+          often transcends language, industry, and genre. This index covers actors, directors, and
+          filmmakers whose work appears in our catalogue, drawn from all eight major Indian film
+          industries. Click any profile to see their biography, filmography, and the titles currently
+          available to stream.
+        </div>
+        <div className="tagline" style={{ lineHeight: 1.8, marginTop: 8 }}>
+          You can also find cast members directly from any movie page — click a cast photo to jump
+          straight to their profile. Use the search bar to look up a specific actor by name
+          (misspellings and phonetic matches are supported).
+        </div>
+      </div>
+
       {loading && <div className="tagline" style={{ marginTop: 12 }}>Loading…</div>}
       {error && <div className="tagline" style={{ marginTop: 12 }}>Failed to load: {error}</div>}
 

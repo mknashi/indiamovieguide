@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RiArrowLeftLine, RiExternalLinkLine, RiPlayLine } from 'react-icons/ri';
 import { navigate } from '../router';
+import type { Movie } from '../types';
 
 type SongPayload = {
   id: string;
@@ -35,6 +36,7 @@ function youtubeEmbedUrl(input?: string): string | null {
 
 export function SongPage({ id }: { id: string }) {
   const [song, setSong] = useState<SongPayload | null>(null);
+  const [movie, setMovie] = useState<Movie | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +44,8 @@ export function SongPage({ id }: { id: string }) {
     let alive = true;
     setLoading(true);
     setError(null);
+    setSong(null);
+    setMovie(null);
     (async () => {
       try {
         const res = await fetch(`/api/songs/${encodeURIComponent(id)}`, { cache: 'no-store' });
@@ -49,6 +53,13 @@ export function SongPage({ id }: { id: string }) {
         if (!res.ok) throw new Error((data as any)?.error || `HTTP ${res.status}`);
         if (!alive) return;
         setSong(data);
+        if (data.movieId) {
+          const mres = await fetch(`/api/movies/${encodeURIComponent(data.movieId)}`, { cache: 'no-store' });
+          if (mres.ok) {
+            const mdata = (await mres.json().catch(() => null)) as Movie | null;
+            if (alive && mdata) setMovie(mdata);
+          }
+        }
       } catch (e: any) {
         if (!alive) return;
         setError(e?.message || 'Failed to load song');
@@ -80,8 +91,8 @@ export function SongPage({ id }: { id: string }) {
             else navigate('/');
           }}
         >
-          <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiArrowLeftLine  /></span>
-          Back
+          <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}><RiArrowLeftLine /></span>
+          {song?.movieId ? 'Back to movie' : 'Back'}
         </button>
         <span className="inline-pill">Song</span>
       </div>
@@ -90,65 +101,120 @@ export function SongPage({ id }: { id: string }) {
       {error && <div className="tagline">Failed to load: {error}</div>}
 
       {!loading && song && (
-        <div className="detail" style={{ marginTop: 12 }}>
-          <h4 style={{ margin: 0 }}>{song.title}</h4>
-          <div className="tagline" style={{ marginTop: 8 }}>
-            {(song.movieTitle ? `${song.movieTitle}` : 'Movie') +
-              (song.singers?.length ? ` · ${song.singers.join(', ')}` : '') +
-              (song.platform ? ` · ${song.platform}` : '')}
-          </div>
+        <>
+          <div className="detail" style={{ marginTop: 12 }}>
+            <h4 style={{ margin: 0 }}>{song.title}</h4>
+            <div className="meta" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+              {song.movieTitle && (
+                <button
+                  className="chip"
+                  type="button"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => song.movieId && navigate(`/movie/${encodeURIComponent(song.movieId!)}`)}
+                >
+                  {song.movieTitle}
+                </button>
+              )}
+              {movie?.language && <span className="chip">{movie.language}</span>}
+              {movie?.releaseDate && (
+                <span className="chip">{new Date(movie.releaseDate).getFullYear()}</span>
+              )}
+              {typeof movie?.rating === 'number' && (
+                <span className="chip">★ {movie.rating.toFixed(1)}</span>
+              )}
+            </div>
 
-          {song.youtubeUrl ? (
-            <>
-              <div
-                style={{
-                  marginTop: 12,
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  border: '1px solid rgba(255,255,255,0.10)',
-                  background: 'rgba(0,0,0,0.25)'
-                }}
-              >
-                {embed ? (
-                  <iframe
-                    title={`${song.title} player`}
-                    src={`${embed}?autoplay=1&rel=0`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    style={{ width: '100%', aspectRatio: '16/9', border: 0, display: 'block' }}
-                  />
-                ) : (
-                  <div style={{ padding: 14 }}>
-                    <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
-                    <div style={{ marginTop: 10 }}>
-                      <a className="ghost-button" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                        <span style={{marginRight: 6, display: 'inline-flex', alignItems: 'center'}}><RiPlayLine  /></span>
-                        Open song
-                        <span style={{marginLeft: 8, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine  /></span>
-                      </a>
+            {song.singers?.length > 0 && (
+              <div className="tagline" style={{ marginTop: 8 }}>
+                Sung by {song.singers.join(', ')}
+                {song.platform ? ` · ${song.platform}` : ''}
+              </div>
+            )}
+
+            {movie?.synopsis && (
+              <div className="tagline" style={{ lineHeight: 1.8, marginTop: 10 }}>
+                {movie.synopsis}
+              </div>
+            )}
+
+            {song.youtubeUrl ? (
+              <>
+                <div
+                  style={{
+                    marginTop: 14,
+                    borderRadius: 16,
+                    overflow: 'hidden',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    background: 'rgba(0,0,0,0.25)'
+                  }}
+                >
+                  {embed ? (
+                    <iframe
+                      title={`${song.title}${song.movieTitle ? ` — ${song.movieTitle}` : ''}`}
+                      src={`${embed}?autoplay=1&rel=0`}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      style={{ width: '100%', aspectRatio: '16/9', border: 0, display: 'block' }}
+                    />
+                  ) : (
+                    <div style={{ padding: 14 }}>
+                      <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
+                      <div style={{ marginTop: 10 }}>
+                        <a className="ghost-button" href={song.youtubeUrl} target="_blank" rel="noreferrer">
+                          <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}><RiPlayLine /></span>
+                          Open song
+                          <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center' }}><RiExternalLinkLine /></span>
+                        </a>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <a className="chip" href={song.youtubeUrl} target="_blank" rel="noreferrer">
-                  YouTube link <span style={{marginLeft: 6, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine size={14}  /></span>
-                </a>
-              </div>
-            </>
-          ) : (
-            <div className="tagline" style={{ marginTop: 10 }}>
-              No playable link available yet.
-              {ytSearchUrl ? (
+                  )}
+                </div>
                 <div style={{ marginTop: 10 }}>
-                  <a className="chip" href={ytSearchUrl} target="_blank" rel="noreferrer">
-                    Search on YouTube <span style={{marginLeft: 6, display: 'inline-flex', alignItems: 'center'}}><RiExternalLinkLine size={14}  /></span>
+                  <a className="chip" href={song.youtubeUrl} target="_blank" rel="noreferrer">
+                    YouTube link{' '}
+                    <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center' }}><RiExternalLinkLine size={14} /></span>
                   </a>
                 </div>
-              ) : null}
+              </>
+            ) : (
+              <div className="tagline" style={{ marginTop: 10 }}>
+                No playable link available yet.
+                {ytSearchUrl ? (
+                  <div style={{ marginTop: 10 }}>
+                    <a className="chip" href={ytSearchUrl} target="_blank" rel="noreferrer">
+                      Search on YouTube{' '}
+                      <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center' }}><RiExternalLinkLine size={14} /></span>
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+
+          {song.movieId && (
+            <div className="detail" style={{ marginTop: 12 }}>
+              <div className="tagline" style={{ marginBottom: 8 }}>More from this film</div>
+              <div className="meta" style={{ flexWrap: 'wrap' }}>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => navigate(`/movie/${encodeURIComponent(song.movieId!)}`)}
+                >
+                  Full movie details
+                </button>
+                {movie?.trailerUrl && (
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => navigate(`/trailer/${encodeURIComponent(song.movieId!)}`)}
+                  >
+                    Watch trailer
+                  </button>
+                )}
+              </div>
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

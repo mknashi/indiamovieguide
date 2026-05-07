@@ -73,59 +73,88 @@ export function TrailerPage({ id }: { id: string }) {
       {error && <div className="tagline">Failed to load: {error}</div>}
 
       {!loading && movie && (
-        <div className="detail" style={{ marginTop: 12 }}>
-          <h4 style={{ margin: 0 }}>{movie.title}</h4>
-          <div className="tagline" style={{ marginTop: 8 }}>
-            {movie.trailerUrl ? 'Official trailer (best-effort).' : 'Trailer not available yet.'}
+        <>
+          <div className="detail" style={{ marginTop: 12 }}>
+            <h4 style={{ margin: 0 }}>{movie.title}</h4>
+            <div className="meta" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+              {movie.language && <span className="chip">{movie.language}</span>}
+              {movie.releaseDate && (
+                <span className="chip">{new Date(movie.releaseDate).getFullYear()}</span>
+              )}
+              {typeof movie.rating === 'number' && (
+                <span className="chip">★ {movie.rating.toFixed(1)}</span>
+              )}
+            </div>
+
+            {movie.synopsis && (
+              <div className="tagline" style={{ lineHeight: 1.8, marginTop: 10 }}>
+                {movie.synopsis}
+              </div>
+            )}
+
+            {movie.trailerUrl ? (
+              <>
+                <div
+                  style={{
+                    marginTop: 14,
+                    borderRadius: 16,
+                    overflow: 'hidden',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    background: 'rgba(0,0,0,0.25)',
+                  }}
+                >
+                  {embed ? (
+                    <iframe
+                      title={`${movie.title} — official trailer`}
+                      src={`${embed}?autoplay=1&rel=0`}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      style={{ width: '100%', aspectRatio: '16/9', border: 0, display: 'block' }}
+                    />
+                  ) : (
+                    <div style={{ padding: 14 }}>
+                      <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
+                      <div style={{ marginTop: 10 }}>
+                        <a className="ghost-button" href={movie.trailerUrl} target="_blank" rel="noreferrer">
+                          <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
+                            <RiPlayLine />
+                          </span>
+                          Open trailer
+                          <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center' }}>
+                            <RiExternalLinkLine />
+                          </span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <a className="chip" href={movie.trailerUrl} target="_blank" rel="noreferrer">
+                    Trailer link{' '}
+                    <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center' }}>
+                      <RiExternalLinkLine size={14} />
+                    </span>
+                  </a>
+                </div>
+              </>
+            ) : (
+              <div className="tagline" style={{ marginTop: 10 }}>Trailer not available yet.</div>
+            )}
           </div>
 
-          {movie.trailerUrl ? (
-            <>
-              <div
-                style={{
-                  marginTop: 12,
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  border: '1px solid rgba(255,255,255,0.10)',
-                  background: 'rgba(0,0,0,0.25)'
-                }}
+          <div className="detail" style={{ marginTop: 12 }}>
+            <div className="tagline" style={{ marginBottom: 8 }}>More from this film</div>
+            <div className="meta" style={{ flexWrap: 'wrap' }}>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => navigate(`/movie/${encodeURIComponent(id)}`)}
               >
-                {embed ? (
-                  <iframe
-                    title={`${movie.title} trailer`}
-                    src={`${embed}?autoplay=1&rel=0`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    style={{ width: '100%', aspectRatio: '16/9', border: 0, display: 'block' }}
-                  />
-                ) : (
-                  <div style={{ padding: 14 }}>
-                    <div className="tagline">Embedded player is only supported for YouTube links right now.</div>
-                    <div style={{ marginTop: 10 }}>
-                      <a className="ghost-button" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                        <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
-                          <RiPlayLine />
-                        </span>
-                        Open trailer
-                        <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center' }}>
-                          <RiExternalLinkLine />
-                        </span>
-                      </a>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <a className="chip" href={movie.trailerUrl} target="_blank" rel="noreferrer">
-                  Trailer link{' '}
-                  <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center' }}>
-                    <RiExternalLinkLine size={14} />
-                  </span>
-                </a>
-              </div>
-            </>
-          ) : null}
-        </div>
+                Full movie details
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

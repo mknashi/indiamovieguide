@@ -121,6 +121,31 @@ export function SearchPage({ q }: { q: string }) {
         </>
       )}
 
+      {!q && !loading && (
+        <div className="detail" style={{ marginTop: 14 }}>
+          <h4>Search IndiaMovieGuide</h4>
+          <div className="tagline" style={{ lineHeight: 1.8 }}>
+            Search across thousands of Indian films spanning Bollywood, Tollywood, Kollywood,
+            Mollywood, Sandalwood, Marathi, Bengali, and Punjabi cinema. You can search by movie
+            title, actor name, director, or genre — misspellings and phonetic variations are
+            supported, so "Rajamouli" and "Rajmouli" will both find S. S. Rajamouli.
+          </div>
+          <div className="meta" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+            {['RRR', 'Deepika Padukone', 'Tamil Action', 'Prabhas', 'Thunivu', 'Vijay'].map((ex) => (
+              <button
+                key={ex}
+                className="chip"
+                type="button"
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/search?q=${encodeURIComponent(ex)}`)}
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="section-header" style={{ marginTop: 18 }}>
         <h3>Results</h3>
         <span className="inline-pill">{sorted.length} titles</span>
@@ -136,9 +161,9 @@ export function SearchPage({ q }: { q: string }) {
             </div>
           ))}
         </div>
-      ) : (
-        <div className="tagline">No results yet. Try another title or actor.</div>
-      )}
+      ) : q ? (
+        <div className="tagline">No results for "{q}". Try another title or actor.</div>
+      ) : null}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RiInformationLine } from 'react-icons/ri';
 import { Movie } from '../types';
 import { navigate } from '../router';
 import { MovieCard } from '../components/MovieCard';
 import { slugifySegment } from '../utils/slugs';
+import { LANGUAGE_INTROS, LANGUAGE_COLORS } from '../data/languageContent';
 
 // Module-level cache so the initial server-injected data survives route changes.
 const streamingCache = new Map<string, { data: StreamingResponse; ts: number }>();
@@ -54,8 +54,10 @@ const POPULAR_PROVIDERS = [
   'ZEE5',
   'SonyLIV',
   'Sun NXT',
-  'aha'
+  'aha',
 ];
+
+const POPULAR_SET = new Set(POPULAR_PROVIDERS.map((p) => p.toLowerCase()));
 
 export function StreamingPage({ lang, provider }: { lang?: string; provider?: string }) {
   const cacheKey = `streaming:${(lang || 'all').toLowerCase()}`;
@@ -122,13 +124,21 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
         const ra = rank.has(String(a.provider || '').toLowerCase()) ? rank.get(String(a.provider || '').toLowerCase())! : 999;
         const rb = rank.has(String(b.provider || '').toLowerCase()) ? rank.get(String(b.provider || '').toLowerCase())! : 999;
         if (ra !== rb) return ra - rb;
-        // Fall back to count desc so the list remains useful if new providers appear.
         const ca = Number(a.count || 0) || 0;
         const cb = Number(b.count || 0) || 0;
         if (ca !== cb) return cb - ca;
         return String(a.provider || '').localeCompare(String(b.provider || ''));
       });
   }, [providersRaw]);
+
+  const prominentProviders = useMemo(
+    () => providers.filter((p) => POPULAR_SET.has(String(p.provider || '').toLowerCase())),
+    [providers]
+  );
+  const otherProviders = useMemo(
+    () => providers.filter((p) => !POPULAR_SET.has(String(p.provider || '').toLowerCase())),
+    [providers]
+  );
   const movies = payload?.movies || [];
   const lastVerifiedText = payload?.lastVerifiedAt
     ? new Date(String(payload.lastVerifiedAt)).toLocaleString()
@@ -143,6 +153,9 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
     return 'stale';
   })();
 
+  const langIntro = lang ? LANGUAGE_INTROS[lang] ?? null : null;
+  const langColors = lang ? LANGUAGE_COLORS[lang] ?? null : null;
+
   return (
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
@@ -152,6 +165,51 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
         </div>
         <span className="inline-pill">Discover</span>
       </div>
+
+      {!lang && (
+        <div className="detail" style={{ marginTop: 14 }}>
+          <h4 style={{ marginTop: 0 }}>Indian Cinema on Streaming</h4>
+          <p className="tagline" style={{ lineHeight: 1.8, marginTop: 0 }}>
+            India is one of the world's fastest-growing streaming markets, and every major global
+            platform — Netflix, Amazon Prime Video, Disney+ Hotstar, JioCinema, ZEE5, and SonyLIV
+            — has invested heavily in Indian content. The result is an unprecedented catalogue
+            spanning Bollywood blockbusters, Malayalam art-house thrillers, Telugu pan-India epics,
+            Tamil crime dramas, and originals produced specifically for streaming audiences.
+          </p>
+          <p className="tagline" style={{ lineHeight: 1.8 }}>
+            Use the language tabs above to filter by film industry, or pick a platform below to
+            see what is currently available in our catalogue. Streaming availability is updated
+            continuously — opening a movie's detail page triggers a background refresh of its
+            current platform links.
+          </p>
+        </div>
+      )}
+
+      {langIntro && langColors && (
+        <div
+          className="detail"
+          style={{
+            marginTop: 14,
+            background: langColors.bg,
+            borderColor: langColors.border,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span
+              className="inline-pill"
+              style={{ background: langColors.accent, color: '#fff', border: 'none' }}
+            >
+              {langColors.industry}
+            </span>
+            <h4 style={{ margin: 0 }}>{langIntro.headline} — Streaming</h4>
+          </div>
+          {langIntro.streamingBody.map((para, i) => (
+            <p key={i} className="tagline" style={{ lineHeight: 1.8, marginTop: i === 0 ? 0 : 8 }}>
+              {para}
+            </p>
+          ))}
+        </div>
+      )}
 
       <div className="detail" style={{ marginTop: 14 }}>
         <div className="provider-seg" role="tablist" aria-label="Streaming platforms">
@@ -163,11 +221,10 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
               setPage(1);
               navigate(lang ? `/streaming/${slugifySegment(lang)}` : '/streaming');
             }}
-            title="All platforms"
           >
             All platforms
           </button>
-          {providers.slice(0, 14).map((p) => (
+          {prominentProviders.map((p) => (
             <button
               key={p.provider}
               className={`provider-pill ${activeProvider === p.provider ? 'is-active' : ''}`}
@@ -181,11 +238,6 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
                 const base = lang ? `/streaming/${slugifySegment(lang)}` : '/streaming';
                 navigate(`${base}?${qs.toString()}`);
               }}
-              title={
-                p.lastVerifiedAt
-                  ? `Last verified: ${new Date(p.lastVerifiedAt).toLocaleString()}`
-                  : `${p.provider} (no verification timestamp yet)`
-              }
             >
               {p.logo ? (
                 <img
@@ -198,6 +250,37 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
               {p.provider}
             </button>
           ))}
+          {otherProviders.length > 0 && (
+            <>
+              <span className="tagline" style={{ alignSelf: 'center', padding: '0 4px', opacity: 0.4 }}>·</span>
+              {otherProviders.map((p) => (
+                <button
+                  key={p.provider}
+                  className={`provider-pill ${activeProvider === p.provider ? 'is-active' : ''}`}
+                  type="button"
+                  style={{ display: 'inline-flex', alignItems: 'center', opacity: 0.75 }}
+                  onClick={() => {
+                    setActiveProvider(p.provider);
+                    setPage(1);
+                    const qs = new URLSearchParams();
+                    qs.set('provider', p.provider);
+                    const base = lang ? `/streaming/${slugifySegment(lang)}` : '/streaming';
+                    navigate(`${base}?${qs.toString()}`);
+                  }}
+                >
+                  {p.logo ? (
+                    <img
+                      src={p.logo}
+                      alt=""
+                      style={{ width: 18, height: 18, borderRadius: 6, marginRight: 8, verticalAlign: 'middle' }}
+                      loading="lazy"
+                    />
+                  ) : null}
+                  {p.provider}
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         <div className="tagline" style={{ marginTop: 10 }}>
@@ -206,18 +289,6 @@ export function StreamingPage({ lang, provider }: { lang?: string; provider?: st
           </span>
           <span style={{ marginLeft: 10 }}>
             Region: <strong>{payload?.filters?.region || 'IN'}</strong> · Last verified: <strong>{lastVerifiedText}</strong>
-          </span>
-          <span
-            className="chip"
-            style={{ marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'help' }}
-            title="Availability comes from TMDB watch/providers (JustWatch-backed) and is cached. Streaming catalogs can change at any time."
-          >
-            <RiInformationLine size={14} />
-            Data source
-          </span>
-          <span style={{ opacity: 0.75 }}>
-            {' '}
-            (cached availability can change; open movie details to refresh in the background)
           </span>
         </div>
       </div>

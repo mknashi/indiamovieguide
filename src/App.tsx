@@ -20,8 +20,12 @@ import { MovieReviewsPage } from './pages/MovieReviewsPage';
 import { StreamingPage } from './pages/StreamingPage';
 import { MoviesIndexPage } from './pages/MoviesIndexPage';
 import { PeopleIndexPage } from './pages/PeopleIndexPage';
+import { ListsPage } from './pages/ListsPage';
+import { ArticlesPage } from './pages/ArticlesPage';
+import { ArticlePage } from './pages/ArticlePage';
 import { initAnalytics, trackPageView } from './services/analytics';
 import { languageFromSlug, slugifySegment } from './utils/slugs';
+import { LANGUAGE_COLORS } from './data/languageContent';
 
 const LANG_ORDER = [
   'All',
@@ -50,6 +54,16 @@ export default function App() {
   useEffect(() => {
     initAnalytics();
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const colors = activeLang !== 'All' ? LANGUAGE_COLORS[activeLang] : null;
+    if (colors) {
+      root.style.setProperty('--lang-accent', colors.accent + '28');
+    } else {
+      root.style.setProperty('--lang-accent', 'transparent');
+    }
+  }, [activeLang]);
 
   useEffect(() => {
     trackPageView(`${window.location.pathname}${window.location.search}`);
@@ -204,6 +218,9 @@ export default function App() {
         {route.name === 'login' && <LoginPage next={route.next} />}
         {route.name === 'account' && <AccountPage />}
         {route.name === 'submit' && <SubmitPage />}
+        {route.name === 'lists' && <ListsPage />}
+        {route.name === 'articles' && <ArticlesPage />}
+        {route.name === 'article' && <ArticlePage slug={route.slug} />}
         {route.name === 'about' && <AboutPage />}
         {route.name === 'contact' && <ContactPage />}
         {route.name === 'feedback' && <FeedbackPage />}
@@ -241,6 +258,28 @@ export default function App() {
             }}
           >
             Add New Movie
+          </a>
+          <span className="footer-sep">·</span>
+          <a
+            href="/lists"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              navigate('/lists');
+            }}
+          >
+            Film Guides
+          </a>
+          <span className="footer-sep">·</span>
+          <a
+            href="/articles"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              navigate('/articles');
+            }}
+          >
+            Articles
           </a>
           <span className="footer-sep">·</span>
           <a

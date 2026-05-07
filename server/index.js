@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import compression from 'compression';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -58,6 +59,7 @@ import {
 
 const PORT = Number(process.env.PORT || 8787);
 const app = express();
+app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 // Minimal cookie parser (avoid extra deps).
 app.use((req, _res, next) => {
@@ -1341,6 +1343,88 @@ async function seoForPath(req, canonical, siteUrl) {
       jsonLd: '',
       prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">Privacy Policy</h1></div>`
     };
+  }
+
+  if (path === '/lists') {
+    return {
+      title: 'Film Guides · IndiaMovieGuide',
+      description: 'Curated film guides across Indian cinema — the best of Bollywood, Tollywood, Kollywood, Mollywood, Sandalwood, and more. Hand-picked lists for every taste.',
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: 'index,follow',
+      jsonLd: '',
+      prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">Film Guides</h1><p>Curated film lists across Indian cinema — Bollywood, Tollywood, Kollywood, Mollywood, Sandalwood and more.</p></div>`
+    };
+  }
+
+  if (path === '/articles') {
+    return {
+      title: 'Articles · IndiaMovieGuide',
+      description: 'Original long-form articles about Indian cinema — its industries, history, defining films, and the directors and stars who shaped them.',
+      ogType: 'website',
+      ogImage: ogDefault,
+      robots: 'index,follow',
+      jsonLd: '',
+      prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">Articles</h1><p>Original long-form articles about Indian cinema — its industries, history, defining films, and the directors and stars who shaped them.</p></div>`
+    };
+  }
+
+  const ARTICLE_META = {
+    'kgf-sandalwood-revolution': {
+      title: 'KGF: The Film That Changed Sandalwood Forever · IndiaMovieGuide',
+      description: 'How KGF: Chapter 1 and Chapter 2 transformed Kannada cinema into a pan-India powerhouse, broke box office records, and made Yash a superstar.',
+      industry: 'Sandalwood',
+    },
+    'kantara-karnataka-folk-traditions': {
+      title: "Kantara and Karnataka's Living Folk Traditions · IndiaMovieGuide",
+      description: "How Rishab Shetty's Kantara brought the Bhoota Kola ritual tradition to global screens and sparked a worldwide conversation about Karnataka's living folk culture.",
+      industry: 'Sandalwood',
+    },
+    'telugu-pan-india-revolution': {
+      title: 'The Pan-India Revolution: How Telugu Cinema Transformed Indian Film · IndiaMovieGuide',
+      description: 'From Baahubali to RRR, how Telugu cinema broke language barriers, rewrote box office rules, and built a global fanbase.',
+      industry: 'Tollywood',
+    },
+    'malayalam-cinema-golden-decade': {
+      title: "Malayalam Cinema's Golden Decade · IndiaMovieGuide",
+      description: 'How Malayalam cinema became India\'s most celebrated film industry — bold storytelling, strong writing, and a creative freedom found nowhere else.',
+      industry: 'Mollywood',
+    },
+    'first-timer-guide-tamil-cinema': {
+      title: "A First-Timer's Guide to Tamil Cinema · IndiaMovieGuide",
+      description: 'New to Kollywood? This guide covers the essential Tamil films, directors, and stars to start your journey into one of India\'s most vibrant film industries.',
+      industry: 'Kollywood',
+    },
+    'bollywood-masala-to-multiplex': {
+      title: 'Bollywood: From Masala to Multiplex · IndiaMovieGuide',
+      description: 'How Bollywood evolved from grand masala entertainers to intimate multiplex dramas — and why both traditions thrive side by side today.',
+      industry: 'Bollywood',
+    },
+  };
+
+  const articleSlugMatch = path.match(/^\/article\/([^/]+)$/);
+  if (articleSlugMatch) {
+    const slug = decodeURIComponent(articleSlugMatch[1]);
+    const meta = ARTICLE_META[slug];
+    if (meta) {
+      const jsonLd = JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: meta.title.replace(' · IndiaMovieGuide', ''),
+        description: meta.description,
+        publisher: { '@type': 'Organization', name: 'IndiaMovieGuide', url: siteUrl },
+        url: `${siteUrl}/article/${encodeURIComponent(slug)}`,
+      });
+      return {
+        title: meta.title,
+        description: meta.description,
+        ogType: 'article',
+        ogImage: ogDefault,
+        robots: 'index,follow',
+        jsonLd,
+        prerender: `<div style="padding:16px 20px;"><h1 style="margin:0 0 8px;font-size:24px;">${escapeHtml(meta.title.replace(' · IndiaMovieGuide', ''))}</h1><p>${escapeHtml(meta.description)}</p></div>`
+      };
+    }
   }
 
   return {
@@ -3674,6 +3758,49 @@ app.get('/api/spotlight', async (req, res) => {
   res.json({ generatedAt: nowIso(), groups: [{ language: targetLang, persons }] });
 });
 
+// --- Featured movie (public) ---
+app.get('/api/featured', (req, res) => {
+  const lang = String(req.query.lang || '').trim();
+  let movieId = null;
+  if (lang) {
+    const row = metaGet(`featured_movie:${lang}`);
+    if (row?.value) movieId = row.value;
+  }
+  if (!movieId) {
+    const row = metaGet('featured_movie:all');
+    if (row?.value) movieId = row.value;
+  }
+  if (!movieId) return res.json({ featured: null });
+  const movie = hydrateMovie(db, movieId);
+  if (!movie) return res.json({ featured: null });
+  res.json({ featured: movie });
+});
+
+// --- Featured movie admin ---
+app.post('/api/admin/featured', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  const lang = String(req.body?.lang || '').trim();
+  const movieId = String(req.body?.movieId || '').trim();
+  if (!movieId) return res.status(400).json({ error: 'movieId required' });
+  const movie = hydrateMovie(db, movieId);
+  if (!movie) return res.status(404).json({ error: 'movie not found' });
+  const key = lang ? `featured_movie:${lang}` : 'featured_movie:all';
+  metaSet(key, movieId);
+  res.json({ ok: true, lang: lang || 'all', movieId, title: movie.title });
+});
+
+app.delete('/api/admin/featured/:lang', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  const lang = String(req.params.lang || '').trim();
+  const key = lang === 'all' ? 'featured_movie:all' : `featured_movie:${lang}`;
+  try {
+    db.prepare('DELETE FROM app_meta WHERE key = ?').run(key);
+  } catch { /* ignore */ }
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/login', (req, res) => {
   const adminPassword = String(process.env.ADMIN_PASSWORD || '');
   if (!adminPassword) return res.status(500).json({ error: 'missing_ADMIN_PASSWORD' });
@@ -5603,6 +5730,13 @@ app.get('/api/catalog.json', (_req, res) => {
 });
 
 // --- SEO: robots + sitemap ---
+app.get('/ads.txt', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  // Format: <exchange domain>, <publisher ID>, <relationship>, <certification authority ID>
+  res.send('google.com, pub-5382516546709796, DIRECT, f08c47fec0942fa0\n');
+});
+
 app.get('/robots.txt', (req, res) => {
   const base = SITE_URL || canonicalUrlFor(req).replace(/\/+$/, '');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -5629,10 +5763,32 @@ app.get('/sitemap.xml', (req, res) => {
   const languageLimit = Math.max(6, Math.min(40, Number(process.env.SITEMAP_LANG_LIMIT || 0) || 12));
   const genreLimit = Math.max(6, Math.min(80, Number(process.env.SITEMAP_GENRE_LIMIT || 0) || 24));
 
-  const staticPaths = ['/', '/movies', '/people', '/about', '/contact', '/feedback', '/privacy'];
+  const staticPaths = [
+    { path: '/',          priority: '1.0' },
+    { path: '/movies',    priority: '0.7' },
+    { path: '/people',    priority: '0.7' },
+    { path: '/streaming', priority: '0.7' },
+    { path: '/lists',     priority: '0.7' },
+    { path: '/articles',  priority: '0.7' },
+    { path: '/about',     priority: '0.5' },
+    { path: '/contact',   priority: '0.4' },
+    { path: '/feedback',  priority: '0.4' },
+    { path: '/privacy',   priority: '0.3' },
+  ];
+  const articleSlugs = [
+    'kgf-sandalwood-revolution',
+    'kantara-karnataka-folk-traditions',
+    'telugu-pan-india-revolution',
+    'malayalam-cinema-golden-decade',
+    'first-timer-guide-tamil-cinema',
+    'bollywood-masala-to-multiplex',
+  ];
   const urls = [];
-  for (const p of staticPaths) {
-    urls.push({ loc: `${base}${p === '/' ? '/' : p}`, lastmod: null, priority: p === '/' ? '1.0' : '0.6' });
+  for (const { path, priority } of staticPaths) {
+    urls.push({ loc: `${base}${path}`, lastmod: null, priority });
+  }
+  for (const slug of articleSlugs) {
+    urls.push({ loc: `${base}/article/${encodeURIComponent(slug)}`, lastmod: null, priority: '0.6' });
   }
 
   const languages = db
@@ -5788,8 +5944,9 @@ app.use((req, res, next) => {
     if (req.query.refresh || req.query.debug) return false;
     return (
       p === '/' || p === '/movies' || p === '/people' || p === '/streaming' ||
+      p === '/lists' || p === '/articles' ||
       /^\/language\//.test(p) || /^\/streaming\//.test(p) || /^\/genre\//.test(p) ||
-      /^\/movie\//.test(p) || /^\/person\//.test(p)
+      /^\/movie\//.test(p) || /^\/person\//.test(p) || /^\/article\//.test(p)
     );
   };
 
@@ -5871,6 +6028,14 @@ app.use((req, res, next) => {
     const prewarmPaths = [
       '/',
       '/movies',
+      '/lists',
+      '/articles',
+      '/article/kgf-sandalwood-revolution',
+      '/article/kantara-karnataka-folk-traditions',
+      '/article/telugu-pan-india-revolution',
+      '/article/malayalam-cinema-golden-decade',
+      '/article/first-timer-guide-tamil-cinema',
+      '/article/bollywood-masala-to-multiplex',
       ...SUPPORTED_LANGUAGES.map((lang) => `/language/${toPathSlug(lang)}`),
       ...SUPPORTED_LANGUAGES.map((lang) => `/streaming/${toPathSlug(lang)}`)
     ];

@@ -17,6 +17,9 @@ export type Route =
   | { name: 'login'; next?: string }
   | { name: 'account' }
   | { name: 'submit' }
+  | { name: 'lists' }
+  | { name: 'articles' }
+  | { name: 'article'; slug: string }
   | { name: 'about' }
   | { name: 'contact' }
   | { name: 'feedback' }
@@ -49,6 +52,8 @@ export function parseRoute(loc: Location = window.location): Route {
   }
   if (path === '/account') return { name: 'account' };
   if (path === '/submit') return { name: 'submit' };
+  if (path === '/lists') return { name: 'lists' };
+  if (path === '/articles') return { name: 'articles' };
   if (path === '/about') return { name: 'about' };
   if (path === '/contact') return { name: 'contact' };
   if (path === '/feedback') return { name: 'feedback' };
@@ -66,6 +71,7 @@ export function parseRoute(loc: Location = window.location): Route {
   if (parts[0] === 'person' && parts[1]) return { name: 'person', id: decodeURIComponent(parts[1]) };
   if (parts[0] === 'trailer' && parts[1]) return { name: 'trailer', id: decodeURIComponent(parts[1]) };
   if (parts[0] === 'song' && parts[1]) return { name: 'song', id: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'article' && parts[1]) return { name: 'article', slug: decodeURIComponent(parts[1]) };
 
   return { name: 'not_found' };
 }
@@ -74,6 +80,7 @@ export function navigate(to: string) {
   if (to === window.location.pathname + window.location.search) return;
   window.history.pushState({}, '', to);
   window.dispatchEvent(new PopStateEvent('popstate'));
+  window.scrollTo({ top: 0 });
 }
 
 export function linkHandler(to: string) {
