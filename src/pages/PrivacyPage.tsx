@@ -49,20 +49,6 @@ export function PrivacyPage() {
 
         <div className="detail" style={{ marginTop: 14 }}>
           <h4>Advertising</h4>
-          <div className="tagline" style={{ lineHeight: 1.7 }}>
-            We use Google AdSense to display ads. Google may use cookies and similar technologies to
-            show you relevant ads based on your browsing activity across websites. You can learn more
-            or opt out at{' '}
-            <a
-              href="https://adssettings.google.com"
-              target="_blank"
-              rel="noreferrer"
-              style={{ textDecoration: 'underline' }}
-            >
-              adssettings.google.com
-            </a>
-            .
-          </div>
           <div className="tagline" style={{ lineHeight: 1.7, marginTop: 8 }}>
             <em>
               This Site is affiliated with Monumetric (dba for The Blogger Network, LLC) for the
