@@ -5733,7 +5733,18 @@ app.get('/api/catalog.json', (_req, res) => {
 app.get('/ads.txt', (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=86400');
-  // Format: <exchange domain>, <publisher ID>, <relationship>, <certification authority ID>
+  const candidates = [
+    path.join(process.cwd(), 'public', 'ads.txt'),
+    path.join(process.cwd(), 'dist', 'ads.txt')
+  ];
+  for (const filePath of candidates) {
+    try {
+      if (fs.existsSync(filePath)) return res.send(fs.readFileSync(filePath, 'utf-8'));
+    } catch {
+      // try the next location
+    }
+  }
+  // Fallback if the file is unavailable during a partial deploy.
   res.send('google.com, pub-5382516546709796, DIRECT, f08c47fec0942fa0\n');
 });
 
