@@ -63,6 +63,22 @@ export function PrivacyPage() {
             </a>
             .
           </div>
+          <div className="tagline" style={{ lineHeight: 1.7, marginTop: 8 }}>
+            <em>
+              This Site is affiliated with Monumetric (dba for The Blogger Network, LLC) for the
+              purposes of placing advertising on the Site, and Monumetric will collect and use
+              certain data for advertising purposes. To learn more about Monumetric&apos;s data
+              usage, click here:{' '}
+              <a
+                href="http://www.monumetric.com/publisher-advertising-privacy"
+                target="_blank"
+                rel="noreferrer"
+                style={{ textDecoration: 'underline' }}
+              >
+                Publisher Advertising Privacy
+              </a>
+            </em>
+          </div>
         </div>
 
         <div className="detail" style={{ marginTop: 14 }}>
