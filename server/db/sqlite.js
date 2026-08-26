@@ -20,6 +20,9 @@ export function openDb() {
   const db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
+  // Cap the WAL at 64 MB. Without this it keeps whatever size its largest
+  // transaction grew it to, for the life of the file.
+  db.exec('PRAGMA journal_size_limit = 67108864;');
   return db;
 }
 
@@ -91,7 +94,6 @@ export function migrate(db) {
       FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
       FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_movie_cast_movie ON movie_cast(movie_id);
     CREATE INDEX IF NOT EXISTS idx_movie_cast_person ON movie_cast(person_id);
 
     CREATE TABLE IF NOT EXISTS songs (
@@ -144,7 +146,6 @@ export function migrate(db) {
       UNIQUE(movie_id, source),
       FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_ratings_movie ON ratings(movie_id);
 
     CREATE TABLE IF NOT EXISTS reviews (
       id TEXT PRIMARY KEY,
@@ -205,7 +206,6 @@ export function migrate(db) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_fav_user ON user_favorites(user_id);
 
     CREATE TABLE IF NOT EXISTS user_watchlist (
       user_id TEXT NOT NULL,
@@ -215,7 +215,6 @@ export function migrate(db) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_watch_user ON user_watchlist(user_id);
 
     -- User reviews (moderated)
     CREATE TABLE IF NOT EXISTS user_reviews (
@@ -326,7 +325,17 @@ export function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_persons_name_soundex ON persons(name_soundex)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_persons_first_name_soundex ON persons(first_name_soundex)');
   // Expression indexes so browse WHERE/ORDER BY clauses can use indexes.
-  db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_lower ON movies(lower(language))');
+  // No idx_movies_language_lower: it is a leftmost prefix of idx_movies_language_release,
+  // so SQLite always picks that one instead. Dropped to save an index over every movie row.
+  db.exec('DROP INDEX IF EXISTS idx_movies_language_lower');
+
+  // Same leftmost-prefix redundancy as above: each of these duplicates a PRIMARY KEY
+  // or UNIQUE autoindex that SQLite already prefers. Verified with EXPLAIN QUERY PLAN
+  // that dropping them leaves the access path unchanged.
+  db.exec('DROP INDEX IF EXISTS idx_movie_cast_movie');
+  db.exec('DROP INDEX IF EXISTS idx_ratings_movie');
+  db.exec('DROP INDEX IF EXISTS idx_fav_user');
+  db.exec('DROP INDEX IF EXISTS idx_watch_user');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movies_language_release ON movies(lower(language), release_date DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_movie_genres_genre_lower ON movie_genres(lower(genre))');
 
@@ -395,7 +404,10 @@ export function migrate(db) {
       FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_psk_key    ON person_search_keys(key)');
+  // No idx_psk_key: PRIMARY KEY (key, person_id) already creates a covering index whose
+  // leftmost column is key, and EXPLAIN QUERY PLAN confirms SQLite prefers it either way.
+  // Over ~8M rows the duplicate index costs well over 100 MB for nothing.
+  db.exec('DROP INDEX IF EXISTS idx_psk_key');
   db.exec('CREATE INDEX IF NOT EXISTS idx_psk_person ON person_search_keys(person_id)');
 
   // Backfill any persons whose search keys haven't been built yet.
