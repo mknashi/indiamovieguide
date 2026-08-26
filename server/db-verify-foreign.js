@@ -26,14 +26,27 @@ const onlyLang = langIdx >= 0 ? String(args[langIdx + 1] || '').toLowerCase() : 
 
 const db = new Database(resolveDbPath(), { readonly: true });
 
-// Indian languages the classifier does NOT know about. A movie here with
-// is_indian = 0 is very likely misclassified.
-const MISSING_INDIAN_LANGUAGES = [
-  'gujarati', 'urdu', 'bhojpuri', 'odia', 'oriya', 'assamese', 'konkani',
-  'manipuri', 'tulu', 'rajasthani', 'haryanvi', 'sindhi', 'kashmiri',
-  'maithili', 'santali', 'dogri', 'nepali', 'sanskrit', 'chhattisgarhi',
-  'awadhi', 'magahi', 'tibetan', 'ladakhi', 'mizo', 'khasi', 'bodo',
+// TMDB stores original_language as an ISO 639-1 code ('hi', 'ta'), but parts of
+// this codebase use full English names ('Hindi'). Both forms appear in the
+// movies table, so every list here must cover both or the check silently
+// matches nothing — which is exactly how an earlier version of this script
+// reported a clean bill of health against a table full of codes.
+const INDIAN_LANGUAGE_CODES = [
+  'hi', 'bn', 'te', 'mr', 'ta', 'ur', 'gu', 'kn', 'ml', 'or', 'pa', 'as',
+  'mai', 'sat', 'ks', 'ne', 'sd', 'doi', 'kok', 'mni', 'brx', 'sa', 'bho',
+  'tcy', 'raj', 'bpy', 'new', 'awa', 'mag', 'hne', 'gom', 'lus', 'kha', 'grt',
 ];
+const INDIAN_LANGUAGE_NAMES = [
+  'hindi', 'bengali', 'telugu', 'marathi', 'tamil', 'urdu', 'gujarati',
+  'kannada', 'malayalam', 'odia', 'oriya', 'punjabi', 'assamese', 'maithili',
+  'santali', 'kashmiri', 'nepali', 'sindhi', 'dogri', 'konkani', 'manipuri',
+  'bodo', 'sanskrit', 'bhojpuri', 'tulu', 'rajasthani', 'haryanvi',
+  'chhattisgarhi', 'awadhi', 'magahi', 'mizo', 'khasi',
+];
+// Every Indian language in either form. The classifier only recognises 8 names,
+// so anything else here is a language it cannot possibly have matched on.
+const ALL_INDIAN = [...INDIAN_LANGUAGE_CODES, ...INDIAN_LANGUAGE_NAMES];
+const MISSING_INDIAN_LANGUAGES = ALL_INDIAN.filter((l) => !INDIAN_LANGUAGES_LOWER.includes(l));
 
 if (onlyLang) {
   const rows = db
@@ -85,6 +98,26 @@ for (const r of byLang) {
       ? '  <-- should have been caught by the language rule; investigate'
       : '';
   console.log(`  ${String(r.n).padStart(8)}  ${r.lang}${flag}`);
+}
+
+// The same breakdown for movies that WERE kept. If these are codes while the
+// classifier matches on names, then the language rule never fired at all and
+// is_indian rests entirely on production_countries containing 'IN'.
+console.log('\n-- languages among KEPT (is_indian = 1) movies (top 20) --\n');
+for (const r of db
+  .prepare(
+    `SELECT COALESCE(NULLIF(TRIM(language), ''), '(none)') AS lang, COUNT(*) AS n
+       FROM movies WHERE COALESCE(is_indian, 1) = 1
+      GROUP BY lower(lang) ORDER BY n DESC LIMIT 20`
+  )
+  .all()) {
+  const l = String(r.lang).toLowerCase();
+  const form = INDIAN_LANGUAGES_LOWER.includes(l)
+    ? 'name — matched by the language rule'
+    : ALL_INDIAN.includes(l)
+      ? 'Indian, but NOT in INDIAN_LANGUAGES — kept only via production_countries'
+      : '';
+  console.log(`  ${String(r.n).padStart(8)}  ${String(r.lang).padEnd(12)}${form}`);
 }
 
 console.log('\n-- suspected false negatives --\n');
