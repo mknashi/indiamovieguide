@@ -6133,13 +6133,29 @@ async function pruneStaleData() {
         AND substr(key, instr(key, ':') + 1) NOT IN (SELECT id FROM movies)
     `).run().changes;
 
+    // 7. FTS5 stores every deleted row as a tombstone in its own b-tree segment.
+    //    Each movie/person re-ingest is a delete+insert, so on a long-lived index
+    //    the garbage segments can dwarf the live data. 'optimize' merges them.
+    await yield_();
+    try { db.prepare("INSERT INTO search_index(search_index) VALUES('optimize')").run(); } catch { /* FTS may not exist yet */ }
+
+    // 8. Hand freed pages back to the OS a slice at a time. This only does
+    //    anything once auto_vacuum is INCREMENTAL (see server/db-shrink.js);
+    //    on a legacy file it is a no-op and the file needs one full VACUUM.
+    await yield_();
+    const autoVacuum = db.prepare('PRAGMA auto_vacuum').get().auto_vacuum;
+    if (autoVacuum === 2) db.exec('PRAGMA incremental_vacuum(2000)');
+
     await yield_();
     const pageSize = db.prepare('PRAGMA page_size').get().page_size;
     const freePages = db.prepare('PRAGMA freelist_count').get().freelist_count;
     const freeMB = ((pageSize * freePages) / 1024 / 1024).toFixed(1);
 
     console.log(
-      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows — ${freeMB} MB reclaimable (run VACUUM to return to OS)`
+      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows — ` +
+        (autoVacuum === 2
+          ? `${freeMB} MB free pages (incremental vacuum active)`
+          : `${freeMB} MB reclaimable (auto_vacuum off — run server/db-shrink.js once to compact and enable it)`)
     );
   } catch (err) {
     console.error('[startup] pruneStaleData error:', err.message);
@@ -6151,11 +6167,66 @@ async function pruneStaleData() {
 setTimeout(() => pruneStaleData().catch(() => {}), 30_000);
 setInterval(() => pruneStaleData().catch(() => {}), 60 * 60_000);
 
+// Disk usage summary. Deliberately cheap: every query here is a pragma or a
+// stat() call, so the response is instant regardless of database size.
+//
+// It does NOT walk dbstat. better-sqlite3 is synchronous, so a `SELECT ... FROM
+// dbstat GROUP BY name` over a multi-GB file would block the event loop for
+// minutes and take the whole site down with it. Pass ?object=<table_or_index>
+// to measure exactly one b-tree, or run `node server/db-report.js` for a full
+// breakdown from the shell where blocking costs nothing.
+app.get('/api/admin/db-stats', (req, res) => {
+  const token = requireAdmin(req, res);
+  if (!token) return;
+  try {
+    const dbFile = resolveDbPath();
+    const sizeOf = (p) => { try { return fs.statSync(p).size; } catch { return 0; } };
+    const pageSize = db.prepare('PRAGMA page_size').get().page_size;
+    const freePages = db.prepare('PRAGMA freelist_count').get().freelist_count;
+    const autoVacuum = db.prepare('PRAGMA auto_vacuum').get().auto_vacuum;
+
+    const payload = {
+      ok: true,
+      path: dbFile,
+      fileBytes: sizeOf(dbFile),
+      walBytes: sizeOf(`${dbFile}-wal`),
+      pageSize,
+      freePages,
+      reclaimableBytes: pageSize * freePages,
+      autoVacuum: ['none', 'full', 'incremental'][autoVacuum] ?? autoVacuum,
+      hint: 'Add ?object=<name> to size one table or index. Full breakdown: node server/db-report.js',
+    };
+
+    const object = String(req.query.object || '').trim();
+    if (object) {
+      // Reject unknown names rather than letting an arbitrary string reach the
+      // query, and so a typo does not silently report 0 bytes.
+      const known = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE name = ? AND type IN ('table','index')")
+        .get(object);
+      if (!known) return res.status(404).json({ error: 'unknown_object', object });
+      try {
+        payload.object = object;
+        payload.objectBytes = db.prepare('SELECT SUM(pgsize) AS b FROM dbstat WHERE name = ?').get(object)?.b || 0;
+      } catch (err) {
+        payload.objectError = err.message; // dbstat vtab not compiled in
+      }
+    }
+
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/db-vacuum', (req, res) => {
   const token = requireAdmin(req, res);
   if (!token) return;
   try {
     const before = db.prepare('PRAGMA page_count').get().page_count * db.prepare('PRAGMA page_size').get().page_size;
+    // auto_vacuum can only be changed by a full VACUUM, so set it just before.
+    // Afterwards the hourly prune returns freed pages to the OS on its own.
+    db.exec('PRAGMA auto_vacuum = INCREMENTAL');
     db.exec('VACUUM');
     const after = db.prepare('PRAGMA page_count').get().page_count * db.prepare('PRAGMA page_size').get().page_size;
     const freedMB = ((before - after) / 1024 / 1024).toFixed(2);
