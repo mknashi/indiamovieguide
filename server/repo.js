@@ -12,10 +12,50 @@ export const INDIAN_LANGUAGES = [
   'Malayalam',
   'Marathi',
   'Bengali',
-  'Punjabi'
+  'Punjabi',
+  // Added after an audit found ~411 Indian films marked is_indian = 0 purely
+  // because their language was absent here and TMDB had not tagged them 'IN'.
+  'Gujarati',
+  'Odia',
+  'Oriya',
+  'Assamese',
+  'Konkani',
+  'Manipuri',
+  'Maithili',
+  'Bhojpuri',
+  'Tulu',
+  'Dogri',
+  'Santali',
+  'Bodo',
+  'Kashmiri',
+  'Sanskrit',
+  'Rajasthani',
+  'Haryanvi',
+  'Chhattisgarhi',
+  'Awadhi',
+  'Magahi'
 ];
 
-export const INDIAN_LANGUAGES_LOWER = INDIAN_LANGUAGES.map((l) => l.toLowerCase());
+// Deliberately excluded: Urdu, Nepali and Sindhi. Each is primarily the national
+// language of Pakistan or Nepal, and in this dataset only 6 of 442 Urdu titles
+// and 0 of 192 Nepali titles carried 'IN' in production_countries. Treating them
+// as Indian by language alone would pull in a few hundred foreign films, so they
+// stay dependent on the production_countries check.
+
+// TMDB returns original_language as an ISO 639-1 code ('hi'), while the ingest
+// paths that search by language store the full English name ('Hindi'). Both
+// forms are present in the movies table, so the classifier has to accept both —
+// matching on names alone silently missed every code-form row.
+export const INDIAN_LANGUAGE_CODES = [
+  'hi', 'kn', 'te', 'ta', 'ml', 'mr', 'bn', 'pa', 'gu', 'or', 'as', 'kok',
+  'mni', 'mai', 'bho', 'tcy', 'doi', 'sat', 'brx', 'ks', 'sa', 'raj', 'hne',
+  'awa', 'mag'
+];
+
+export const INDIAN_LANGUAGES_LOWER = [
+  ...INDIAN_LANGUAGES.map((l) => l.toLowerCase()),
+  ...INDIAN_LANGUAGE_CODES
+];
 
 export function makeId(prefix, numericId) {
   return `${prefix}:${numericId}`;
