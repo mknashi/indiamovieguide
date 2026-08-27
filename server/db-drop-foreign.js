@@ -30,6 +30,11 @@ const keepOverlapIdx = args.indexOf('--keep-overlap');
 const keepOverlap = keepOverlapIdx >= 0 ? Number(args[keepOverlapIdx + 1] ?? 1) : 1;
 
 const db = new Database(resolveDbPath());
+// The web server writes to this database continuously — the hourly prune runs
+// FTS optimize and incremental_vacuum, both slow. better-sqlite3 waits only 5s
+// by default, which is not enough: a long maintenance run would abort partway
+// with SQLITE_BUSY. Wait several minutes instead.
+db.pragma('busy_timeout = 300000');
 db.pragma('foreign_keys = ON'); // required — the ON DELETE CASCADEs do most of the work
 db.pragma('journal_size_limit = 67108864');
 
@@ -101,6 +106,23 @@ if (!apply) {
   process.exit(0);
 }
 
+
+// Even a 5-minute wait can be exceeded if the server starts a long write just
+// as we retry. Batches are independent and already committed one at a time, so
+// retrying is always safe: nothing is half-applied.
+function withRetry(label, fn, attempts = 5) {
+  for (let i = 1; ; i++) {
+    try { return fn(); }
+    catch (err) {
+      const busy = String(err.code || '').startsWith('SQLITE_BUSY') || /database is locked/i.test(err.message);
+      if (!busy || i >= attempts) throw err;
+      const waitMs = 5000 * i;
+      console.log(`\n  ${label}: database locked, retry ${i}/${attempts - 1} in ${waitMs / 1000}s`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+    }
+  }
+}
+
 // 1. Foreign movies. ON DELETE CASCADE clears movie_genres, movie_cast, songs,
 //    ott_offers, ratings, reviews, user_favorites and user_watchlist with them.
 let removed = 0;
@@ -110,12 +132,12 @@ const dropFromSet = db.prepare('DELETE FROM to_delete WHERE id = ?');
 for (;;) {
   const ids = pickMovies.all(BATCH).map((r) => r.id);
   if (!ids.length) break;
-  db.transaction(() => {
+  withRetry('movies', () => db.transaction(() => {
     for (const id of ids) {
       delMovie.run(id);
       dropFromSet.run(id); // so the next page does not return it again
     }
-  })();
+  })());
   removed += ids.length;
   db.pragma('wal_checkpoint(TRUNCATE)');
   process.stdout.write(`\r  movies deleted: ${removed}/${foreignMovies}`);
@@ -132,7 +154,7 @@ const delPerson = db.prepare('DELETE FROM persons WHERE id = ?');
 for (;;) {
   const ids = pickPersons.all(BATCH).map((r) => r.id);
   if (!ids.length) break;
-  db.transaction(() => { for (const id of ids) delPerson.run(id); })();
+  withRetry('persons', () => db.transaction(() => { for (const id of ids) delPerson.run(id); })());
   personsRemoved += ids.length;
   db.pragma('wal_checkpoint(TRUNCATE)');
   process.stdout.write(`\r  persons deleted: ${personsRemoved}`);

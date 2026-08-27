@@ -31,6 +31,11 @@ const concurrency = Number(val('--concurrency', 8));
 const PROGRESS_KEY = 'recheck_countries_after_id';
 
 const db = new Database(resolveDbPath());
+// The web server writes to this database continuously — the hourly prune runs
+// FTS optimize and incremental_vacuum, both slow. better-sqlite3 waits only 5s
+// by default, which is not enough: a long maintenance run would abort partway
+// with SQLITE_BUSY. Wait several minutes instead.
+db.pragma('busy_timeout = 300000');
 
 // Candidates: flagged non-Indian, but with at least one cast member who also
 // appears in an Indian film. That overlap is the strongest remaining signal
