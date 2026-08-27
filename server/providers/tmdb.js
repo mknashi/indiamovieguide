@@ -193,6 +193,25 @@ export async function tmdbGetMovieFull(tmdbId) {
   };
 }
 
+// Minimal lookup for re-deriving is_indian: production countries and original
+// language only. tmdbGetMovieFull appends credits, videos and watch providers,
+// which is far more payload than this needs when checking tens of thousands of
+// rows. Returns null for 404 (title withdrawn from TMDB) so callers can tell
+// "not Indian" apart from "no longer exists".
+export async function tmdbGetMovieCountries(tmdbId) {
+  try {
+    const d = await tmdbFetch(`/movie/${tmdbId}`);
+    return {
+      productionCountries: (d.production_countries || []).map((c) => c.iso_3166_1).filter(Boolean),
+      originalLanguage: d.original_language || '',
+      title: d.title || d.original_title || ''
+    };
+  } catch (err) {
+    if (String(err.message).includes(' 404 ')) return null;
+    throw err;
+  }
+}
+
 export async function tmdbGetMovieOffers(tmdbId, { region } = {}) {
   const details = await tmdbFetch(`/movie/${tmdbId}/watch/providers`, {});
 
