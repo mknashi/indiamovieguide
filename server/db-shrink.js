@@ -22,6 +22,11 @@ const intoPath = intoIdx >= 0 ? args[intoIdx + 1] : null;
 
 const dbPath = resolveDbPath();
 const db = new Database(dbPath);
+// The web server writes to this database continuously — the hourly prune runs
+// FTS optimize and incremental_vacuum, both slow. better-sqlite3 waits only 5s
+// by default, which is not enough: a long maintenance run would abort partway
+// with SQLITE_BUSY. Wait several minutes instead.
+db.pragma('busy_timeout = 300000');
 const sizeOf = (p) => (fs.existsSync(p) ? fs.statSync(p).size : 0);
 const fileBytes = () => sizeOf(dbPath) + sizeOf(`${dbPath}-wal`);
 
