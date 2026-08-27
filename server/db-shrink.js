@@ -37,10 +37,11 @@ db.pragma('journal_size_limit = 67108864'); // 64 MB
 // 3. Drop cached API responses. They re-fetch on demand, so nothing is lost.
 const cacheDeleted = db.prepare('DELETE FROM api_cache').run().changes;
 
-// 4. Drop the redundant JSON blobs the app recomputes or re-fetches.
-const countries = db
-  .prepare('UPDATE movies SET production_countries_json = NULL WHERE production_countries_json IS NOT NULL')
-  .run().changes;
+// 4. Drop filmography_json, which is refetched on each person page visit.
+//    production_countries_json is deliberately kept: nulling it destroyed the
+//    only record of why each movie was classified, and recovering it meant
+//    refetching tens of thousands of titles from TMDB. A few bytes per row is
+//    far cheaper than losing that evidence again.
 const filmographies = db
   .prepare('UPDATE persons SET filmography_json = NULL WHERE filmography_json IS NOT NULL')
   .run().changes;
@@ -122,7 +123,7 @@ if (dropped.length) console.log(`  dropped redundant indexes: ${dropped.join(', 
 const pageSize = db.pragma('page_size', { simple: true });
 const freePages = db.pragma('freelist_count', { simple: true });
 
-console.log(`  pruned: ${cacheDeleted} api_cache, ${countries} country blobs, ${filmographies} filmographies, ` +
+console.log(`  pruned: ${cacheDeleted} api_cache, ${filmographies} filmographies, ` +
   `${sessions} sessions, ${resets} resets${orphans.length ? `, ${orphans.join(', ')}` : ''}`);
 console.log(`  ${ftsNote}`);
 console.log(`  ${mb(freePages * pageSize)} of free pages inside the file`);
@@ -146,14 +147,36 @@ function freeBytesFor(target) {
 }
 
 const target = intoPath || dbPath;
-const needed = sizeOf(dbPath);
+
+// VACUUM INTO writes only the compacted result, so it needs room for the live
+// data — not for a second copy of the current file. After a large delete those
+// differ enormously: a 4 GB file that is 93% free pages compacts to ~300 MB.
+// Sizing this as the whole file (as an earlier version did) demanded gigabytes
+// that VACUUM INTO never actually uses, and refused runs that would have worked.
+const pageSizeB = db.pragma('page_size', { simple: true });
+const pageCount = db.pragma('page_count', { simple: true });
+const freeCount = db.pragma('freelist_count', { simple: true });
+const liveBytes = (pageCount - freeCount) * pageSizeB;
+
+// In-place VACUUM builds the compacted copy and then rewrites the original, so
+// it needs the live size plus journal headroom against the existing file.
+const needed = intoPath ? Math.ceil(liveBytes * 1.15) : sizeOf(dbPath) + Math.ceil(liveBytes * 0.15);
 const free = freeBytesFor(target);
 if (free !== null && free < needed) {
   console.error(
-    `\nNot enough room to compact: VACUUM needs about ${mb(needed)} free on the target volume, ` +
-      `but only ${mb(free)} is available.\n` +
-      `Either raise the Render disk size temporarily, or run with --into <path on another volume>.\n`
+    `\nNot enough room to compact: this needs about ${mb(needed)} free on the target volume, ` +
+      `but only ${mb(free)} is available.`
   );
+  if (!intoPath) {
+    console.error(
+      `\nLive data is only ${mb(liveBytes)}. Compacting to another volume needs far less room\n` +
+        `than rewriting in place — try:\n` +
+        `  node server/db-shrink.js --into /tmp/compact.sqlite\n` +
+        `then stop the service and move it over ${dbPath}.\n`
+    );
+  } else {
+    console.error(`\nPick a target volume with more free space.\n`);
+  }
   db.close();
   process.exit(1);
 }
