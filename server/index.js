@@ -6121,10 +6121,11 @@ async function pruneStaleData() {
     await yield_();
     const cacheDeleted = db.prepare('DELETE FROM api_cache').run().changes;
 
-    // 3. production_countries_json is only used to compute is_indian at ingest time.
-    //    is_indian is already stored on each movie row so this blob is redundant.
-    await yield_();
-    db.prepare('UPDATE movies SET production_countries_json = NULL WHERE production_countries_json IS NOT NULL').run();
+    // 3. production_countries_json is deliberately NOT nulled any more.
+    //    Treating it as redundant destroyed the only record of why each movie was
+    //    classified, and when the language rule turned out to be wrong there was
+    //    no way to re-derive is_indian without refetching ~32k titles from TMDB.
+    //    It is a few bytes per row — far cheaper than losing the evidence again.
 
     // 4. filmography_json on persons is re-fetched from TMDB on each person page visit.
     await yield_();
