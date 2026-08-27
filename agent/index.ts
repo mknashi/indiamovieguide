@@ -269,6 +269,7 @@ async function main() {
       if (args.dryRun) continue;
 
       const movieId = upsertMovieFromTmdb(db, full);
+      if (!movieId) continue; // rejected by the Indian-only gate
       stats.upserted++;
 
       if (doYoutube && !full.trailerUrl) {

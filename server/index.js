@@ -1621,8 +1621,7 @@ async function seedLanguageIfSparse(langName, opts = {}) {
     if (cancelRef?.cancelled) break;
     try {
       const full = await tmdbGetMovieFull(tmdbId);
-      upsertMovieFromTmdb(db, full);
-      wrote++;
+      if (upsertMovieFromTmdb(db, full)) wrote++;
     } catch {
       // ignore
     }
@@ -3164,6 +3163,7 @@ async function seedIfEmpty() {
       if (!hits.length) continue;
       const full = await tmdbGetMovieFull(hits[0].tmdbId);
       const movieId = upsertMovieFromTmdb(db, full);
+      if (!movieId) continue; // seed title is not an Indian film
       const year = full.releaseDate ? Number(String(full.releaseDate).slice(0, 4)) : null;
       const wiki = await wikipediaTracklistForMovie({
         title: full.title,
@@ -4247,7 +4247,8 @@ app.get('/api/admin/movies/:id', async (req, res) => {
     if (Number.isFinite(tmdbId)) {
       try {
         const full = await tmdbGetMovieFull(tmdbId);
-        movieId = upsertMovieFromTmdb(db, full);
+        // Admin asked for this specific id, so bypass the Indian-only gate.
+        movieId = upsertMovieFromTmdb(db, full, { allowNonIndian: true });
         movie = hydrateMovie(db, movieId);
       } catch {
         // ignore
@@ -5078,6 +5079,7 @@ app.get('/api/search', async (req, res) => {
     const full = await tmdbGetMovieFull(hit.tmdbId);
     if (!isLikelyIndianMovie(full)) return null;
     const movieId = upsertMovieFromTmdb(db, full);
+    if (!movieId) return null; // belt-and-braces: the gate agrees with the check above
     upsertedMovieIds.push(movieId);
 
     // Ratings from OMDb (optional; needs OMDB_API_KEY).
@@ -5172,6 +5174,10 @@ app.get('/api/search', async (req, res) => {
         try {
           const movieFull = await tmdbGetMovieFull(f.tmdbId);
           const movieId = upsertMovieFromTmdb(db, movieFull);
+          // Non-Indian credit — skip it and the enrichment behind it. This path
+          // is why the foreign catalogue grew: an Indian actor's filmography is
+          // mostly films this site does not cover.
+          if (!movieId) continue;
           const year = movieFull.releaseDate ? Number(String(movieFull.releaseDate).slice(0, 4)) : null;
           const wiki = await wikipediaTracklistForMovie({
             title: movieFull.title,
@@ -5289,8 +5295,12 @@ app.get('/api/movies/:id', async (req, res) => {
       try {
         const full = await tmdbGetMovieFull(tmdbId);
         movieId = upsertMovieFromTmdb(db, full);
-        await enrichMovieIfNeeded(movieId, { debug, autoSongs: true, autoOtt: true });
-        movie = hydrateMovie(db, movieId);
+        // Gate returned null: a non-Indian title. Every read path filters
+        // is_indian = 1, so storing it would only add a row nothing can reach.
+        if (movieId) {
+          await enrichMovieIfNeeded(movieId, { debug, autoSongs: true, autoOtt: true });
+          movie = hydrateMovie(db, movieId);
+        }
       } catch {
         // ignore
       }

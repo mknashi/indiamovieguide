@@ -10,7 +10,32 @@ import {
   toIsoDate
 } from '../repo.js';
 
-export function upsertMovieFromTmdb(db, tmdbMovie) {
+// Single choke point for writing a movie. Non-Indian films are rejected here
+// rather than at each call site: of the 13 places that called this, only 4
+// checked, and the gaps let ~416k foreign films accumulate — 93% of the
+// database, none of it reachable, since every read path filters is_indian = 1.
+//
+// The worst leak was person enrichment, which upserts the top 15 filmography
+// titles of every person it sees; an Indian actor's credits are full of foreign
+// films. Guarding the choke point means a new call site cannot reopen the hole.
+//
+// Pass { allowNonIndian: true } only where a human explicitly asked for a
+// specific title by id, such as the admin movie lookup.
+//
+// Returns null when the movie is rejected, so callers must handle a missing id.
+// The one definition of "is this Indian", shared by the write gate and the
+// is_indian column so the two can never disagree. Mirrors the rule that was
+// previously inlined in upsertMovieFromTmdb and duplicated as
+// isLikelyIndianMovie in both server/index.js and agent/index.ts.
+export function isIndianTmdbMovie(tmdbMovie) {
+  if (!tmdbMovie) return false;
+  if (Array.isArray(tmdbMovie.productionCountries) && tmdbMovie.productionCountries.includes('IN')) return true;
+  return INDIAN_LANGUAGES_LOWER.includes(String(tmdbMovie.language || '').toLowerCase());
+}
+
+export function upsertMovieFromTmdb(db, tmdbMovie, opts = {}) {
+  if (!tmdbMovie) return null;
+  if (!opts.allowNonIndian && !isIndianTmdbMovie(tmdbMovie)) return null;
   const id = makeId('tmdb-movie', tmdbMovie.tmdbId);
   const createdAt = nowIso();
   const updatedAt = createdAt;
@@ -20,12 +45,7 @@ export function upsertMovieFromTmdb(db, tmdbMovie) {
   const titleSoundex = soundex(tmdbMovie.title);
   const titleNorm = normalizeForSearch(tmdbMovie.title);
   const productionCountriesJson = JSON.stringify(tmdbMovie.productionCountries || []);
-  const isIndian =
-    Array.isArray(tmdbMovie.productionCountries) && tmdbMovie.productionCountries.includes('IN')
-      ? 1
-      : INDIAN_LANGUAGES_LOWER.includes(String(tmdbMovie.language || '').toLowerCase())
-        ? 1
-        : 0;
+  const isIndian = isIndianTmdbMovie(tmdbMovie) ? 1 : 0;
 
   db.prepare(
     `
