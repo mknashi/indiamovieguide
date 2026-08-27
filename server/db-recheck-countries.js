@@ -42,12 +42,22 @@ const db = new Database(resolveDbPath());
 // once turns each page into an ordinary indexed range scan.
 const shared = Number.isFinite(minShared) && minShared > 0 ? minShared : 1;
 
+// A successful check always writes production_countries_json, so its absence
+// marks a row as never checked — or checked and failed. Skipping rows that
+// already have it makes a re-run cost only the stragglers instead of the whole
+// set, and means transient TMDB errors get retried rather than silently
+// skipped: the progress marker advances past failures, so without this they
+// would stay unverified and be deleted in the next step.
+// Pass --force to re-check everything regardless.
+const unchecked = args.includes('--force') ? '1=1' : '1=0';
+
 function buildCandidates() {
   if (checkAll) {
     db.exec(`
       CREATE TEMP TABLE recheck_candidates AS
         SELECT m.id AS id, m.tmdb_id AS tmdb_id FROM movies m
-         WHERE COALESCE(m.is_indian, 1) = 0 AND m.tmdb_id IS NOT NULL`);
+         WHERE COALESCE(m.is_indian, 1) = 0 AND m.tmdb_id IS NOT NULL
+           AND (${unchecked} OR m.production_countries_json IS NULL)`);
   } else {
     // People who appear in at least one Indian film.
     db.exec(`
@@ -66,6 +76,7 @@ function buildCandidates() {
           JOIN movie_cast mc ON mc.movie_id = m.id
           JOIN indian_people ip ON ip.person_id = mc.person_id
          WHERE COALESCE(m.is_indian, 1) = 0 AND m.tmdb_id IS NOT NULL
+           AND (${unchecked} OR m.production_countries_json IS NULL)
          GROUP BY m.id
         HAVING COUNT(*) >= ${shared}`);
   }
