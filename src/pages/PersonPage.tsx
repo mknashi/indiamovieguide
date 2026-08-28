@@ -52,7 +52,7 @@ export function PersonPage({ id }: { id: string }) {
   // Posters for the best-known work, a compact table for the long tail. A
   // thousand poster cards would bury the titles that matter; a table stays
   // scannable and keeps the whole credit list on the page.
-  const FEATURED_COUNT = 12;
+  const FEATURED_COUNT = 20;
   const TABLE_PAGE = 50;
   const [tableLimit, setTableLimit] = useState(TABLE_PAGE);
   const featured = useMemo(() => filmography.slice(0, FEATURED_COUNT), [filmography]);
