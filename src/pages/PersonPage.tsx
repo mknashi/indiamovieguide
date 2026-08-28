@@ -47,8 +47,15 @@ export function PersonPage({ id }: { id: string }) {
 
   const filmography = useMemo(() => {
     if (!profile?.filmography?.length) return [];
-    return profile.filmography.slice(0, 24);
+    return profile.filmography.slice(0, 60);
   }, [profile]);
+
+  // Posters for the best-known work, a compact table for the long tail. Showing
+  // 60 poster cards buries the titles that matter; a table stays scannable and
+  // keeps the whole credit list on the page for readers and crawlers.
+  const FEATURED_COUNT = 12;
+  const featured = useMemo(() => filmography.slice(0, FEATURED_COUNT), [filmography]);
+  const rest = useMemo(() => filmography.slice(FEATURED_COUNT), [filmography]);
 
   return (
     <div>
@@ -172,10 +179,10 @@ export function PersonPage({ id }: { id: string }) {
 
           <div className="section-header">
             <h3>All Titles</h3>
-            <span className="inline-pill">Top {filmography.length}</span>
+            <span className="inline-pill">{filmography.length} items</span>
           </div>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-            {filmography.map((f) => (
+            {featured.map((f) => (
               <a
                 key={`${f.title}-${f.releaseDate || ''}-grid`}
                 className="detail"
@@ -210,6 +217,53 @@ export function PersonPage({ id }: { id: string }) {
               </a>
             ))}
           </div>
+
+          {rest.length > 0 && (
+            <>
+              <div className="section-header">
+                <h3>More Titles</h3>
+                <span className="inline-pill">{rest.length} more</span>
+              </div>
+              <div className="filmography-table-wrap">
+                <table className="filmography-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Title</th>
+                      <th scope="col">Year</th>
+                      <th scope="col">Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rest.map((f) => {
+                      const year = (f.releaseDate || '').toString().slice(0, 4);
+                      const linkable = typeof f.tmdbId === 'number';
+                      return (
+                        <tr key={`${f.title}-${f.releaseDate || ''}-row`}>
+                          <td>
+                            {linkable ? (
+                              <a
+                                href={`/movie/${encodeURIComponent(String(f.tmdbId))}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  navigate(`/movie/${encodeURIComponent(String(f.tmdbId))}`);
+                                }}
+                              >
+                                {f.title}
+                              </a>
+                            ) : (
+                              f.title
+                            )}
+                          </td>
+                          <td>{year || '—'}</td>
+                          <td>{f.character || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

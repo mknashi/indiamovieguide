@@ -265,7 +265,11 @@ export async function tmdbGetPersonFull(tmdbId) {
   const filmography = cast
     .slice()
     .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 20)
+    // 60, not 20: combined_credits is already fetched in the call above, so
+    // this costs nothing extra. The old cap silently truncated the SEO
+    // filmography (which asks for 36) and hid a prolific person's less
+    // popular work, including the Indian credits isIndianPerson looks for.
+    .slice(0, 60)
     .map((c) => ({
       tmdbId: c.id,
       title: c.title || c.name,
