@@ -45,17 +45,24 @@ export function PersonPage({ id }: { id: string }) {
     return () => { alive = false; };
   }, [id]);
 
-  const filmography = useMemo(() => {
-    if (!profile?.filmography?.length) return [];
-    return profile.filmography.slice(0, 60);
-  }, [profile]);
+  // No cap: prolific Indian actors genuinely have hundreds of credits, and the
+  // API now returns all of them.
+  const filmography = useMemo(() => profile?.filmography ?? [], [profile]);
 
-  // Posters for the best-known work, a compact table for the long tail. Showing
-  // 60 poster cards buries the titles that matter; a table stays scannable and
-  // keeps the whole credit list on the page for readers and crawlers.
+  // Posters for the best-known work, a compact table for the long tail. A
+  // thousand poster cards would bury the titles that matter; a table stays
+  // scannable and keeps the whole credit list on the page.
   const FEATURED_COUNT = 12;
+  const TABLE_PAGE = 50;
+  const [tableLimit, setTableLimit] = useState(TABLE_PAGE);
   const featured = useMemo(() => filmography.slice(0, FEATURED_COUNT), [filmography]);
   const rest = useMemo(() => filmography.slice(FEATURED_COUNT), [filmography]);
+  // Render the tail in pages so a 1,000-credit actor does not cost a thousand
+  // DOM rows on first paint.
+  const visibleRest = useMemo(() => rest.slice(0, tableLimit), [rest, tableLimit]);
+
+  // A different person means a different list; start the tail over.
+  useEffect(() => { setTableLimit(TABLE_PAGE); }, [id]);
 
   return (
     <div>
@@ -234,7 +241,7 @@ export function PersonPage({ id }: { id: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rest.map((f) => {
+                    {visibleRest.map((f) => {
                       const year = (f.releaseDate || '').toString().slice(0, 4);
                       const linkable = typeof f.tmdbId === 'number';
                       return (
@@ -262,6 +269,17 @@ export function PersonPage({ id }: { id: string }) {
                   </tbody>
                 </table>
               </div>
+              {tableLimit < rest.length && (
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => setTableLimit((n) => n + TABLE_PAGE)}
+                  >
+                    Show more ({rest.length - tableLimit} remaining)
+                  </button>
+                </div>
+              )}
             </>
           )}
         </>
