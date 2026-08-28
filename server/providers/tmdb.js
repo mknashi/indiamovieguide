@@ -264,7 +264,12 @@ export async function tmdbGetPersonFull(tmdbId) {
 
   const filmography = cast
     .slice()
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+    // Sort on vote_count, not popularity. TMDB's popularity is a volatile
+    // trending score, which floats talk shows and reality TV above an actor's
+    // actual films — Shah Rukh Khan led with The Kapil Sharma Show and Koffee
+    // with Karan. Vote count is stable and reflects a title's standing, and it
+    // is the same signal the local search ranking uses.
+    .sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0) || (b.popularity || 0) - (a.popularity || 0))
     // No cap. combined_credits is already fetched in the call above, so every
     // credit is in hand and discarding them buys nothing. Indian cinema makes
     // this matter more than most: Brahmanandam has over a thousand credits,
@@ -278,6 +283,8 @@ export async function tmdbGetPersonFull(tmdbId) {
       title: c.title || c.name,
       mediaType: c.media_type,
       character: c.character || '',
+      // Surfaced so callers can rank or filter without refetching.
+      voteCount: c.vote_count || 0,
       releaseDate: c.release_date || c.first_air_date || null,
       // Carried through so a person can be classified before being stored:
       // an actor whose credits are all foreign-language does not belong here.
