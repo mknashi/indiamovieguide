@@ -482,7 +482,7 @@ function searchPersonsByKeys(db, q) {
        WHERE psk.key IN (${ph})
        GROUP BY p.id
        ORDER BY popularity DESC, movie_count DESC, has_image DESC, has_bio DESC
-       LIMIT 15`
+       LIMIT 200`
     )
     .all(...keysArr);
 
@@ -503,8 +503,27 @@ function searchPersonsByKeys(db, q) {
   const qn = normDice(q);
   const minDice = qn.length <= 4 ? 0.25 : qn.length <= 6 ? 0.30 : 0.35;
 
+  // Rank on how closely the name matches, then on body of work.
+  //
+  // The SQL above cannot do this ordering. Its primary key, tmdb_popularity,
+  // is written by only one of the seven person write paths and is set for 48
+  // of 187,270 rows — so it is noise that lets a nobody with popularity 0.14
+  // and no films outrank an actor with 377. Sorting here on the similarity
+  // score the filter already computes is both meaningful and always available.
+  //
+  // The query fetches 200 rather than 15 for the same reason: a common
+  // surname matches thousands of people, and truncating on a near-empty
+  // column discarded the right person before this filter ever saw them.
   return rows
-    .filter((r) => dice(qn, r.name) >= minDice)
+    .map((r) => ({ ...r, score: dice(qn, r.name) }))
+    .filter((r) => r.score >= minDice)
+    .sort((a, b) =>
+      b.score - a.score ||
+      b.movie_count - a.movie_count ||
+      b.popularity - a.popularity ||
+      b.has_image - a.has_image ||
+      b.has_bio - a.has_bio
+    )
     .slice(0, 5)
     .map((r) => r.id);
 }
@@ -549,9 +568,12 @@ export function searchLocal(db, q) {
         .map((r) => r.id)
     : [];
 
-  // When person found but no movie title match, pull their filmography.
+  // Always pull the filmography of a matched person, not only when the title
+  // search came up empty. Searching an actor's name previously returned a
+  // single film if FTS happened to match one title containing part of that
+  // name — one incidental hit was enough to suppress all 89 of their films.
   let castMovieIds = [];
-  if (!movieIds.length && personIds.length) {
+  if (personIds.length) {
     const inPh = personIds.map(() => '?').join(',');
     castMovieIds = db
       .prepare(
@@ -564,7 +586,10 @@ export function searchLocal(db, q) {
       .map((r) => r.id);
   }
 
-  const allMovieIds = movieIds.length ? movieIds : castMovieIds;
+  // Title matches first — they are the stronger signal when the query really
+  // was a title — then the matched person's films, minus anything already shown.
+  const seen = new Set(movieIds);
+  const allMovieIds = [...movieIds, ...castMovieIds.filter((id) => !seen.has(id))];
   return {
     movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
     persons: personIds.map((id) => hydratePerson(db, id)).filter(Boolean)
