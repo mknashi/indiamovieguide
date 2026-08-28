@@ -3,6 +3,7 @@ export interface FilmographyItem {
   title: string;
   mediaType?: string;
   character?: string;
+  voteCount?: number;
   releaseDate?: string | null;
   poster?: string;
 }

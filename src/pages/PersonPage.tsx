@@ -45,9 +45,21 @@ export function PersonPage({ id }: { id: string }) {
     return () => { alive = false; };
   }, [id]);
 
-  // No cap: prolific Indian actors genuinely have hundreds of credits, and the
-  // API now returns all of them.
-  const filmography = useMemo(() => profile?.filmography ?? [], [profile]);
+  // Films only. combined_credits mixes in TV, and talk shows carry enough TMDB
+  // weight to lead an actor's page — Shah Rukh Khan opened with The Kapil
+  // Sharma Show and Koffee with Karan ahead of his own films. This is a movie
+  // guide, so TV appearances are listed separately below rather than competing
+  // for the poster grid.
+  //
+  // mediaType is absent on user-submitted people, so treat unknown as a film.
+  const filmography = useMemo(
+    () => (profile?.filmography ?? []).filter((f) => (f.mediaType ?? 'movie') === 'movie'),
+    [profile]
+  );
+  const tvCredits = useMemo(
+    () => (profile?.filmography ?? []).filter((f) => f.mediaType === 'tv'),
+    [profile]
+  );
 
   // Posters for the best-known work, a compact table for the long tail. A
   // thousand poster cards would bury the titles that matter; a table stays
@@ -280,6 +292,35 @@ export function PersonPage({ id }: { id: string }) {
                   </button>
                 </div>
               )}
+            </>
+          )}
+
+          {tvCredits.length > 0 && (
+            <>
+              <div className="section-header">
+                <h3>Television</h3>
+                <span className="inline-pill">{tvCredits.length} appearances</span>
+              </div>
+              <div className="filmography-table-wrap">
+                <table className="filmography-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Show</th>
+                      <th scope="col">Year</th>
+                      <th scope="col">Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tvCredits.slice(0, 30).map((f) => (
+                      <tr key={`${f.title}-${f.releaseDate || ''}-tv`}>
+                        <td>{f.title}</td>
+                        <td>{(f.releaseDate || '').toString().slice(0, 4) || '—'}</td>
+                        <td>{f.character || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </>
