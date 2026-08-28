@@ -265,13 +265,23 @@ export async function tmdbGetPersonFull(tmdbId) {
   const filmography = cast
     .slice()
     .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 20)
+    // No cap. combined_credits is already fetched in the call above, so every
+    // credit is in hand and discarding them buys nothing. Indian cinema makes
+    // this matter more than most: Brahmanandam has over a thousand credits,
+    // and Mohanlal, Mammootty and Jagathy Sreekumar are all in the hundreds —
+    // a complete filmography is the point of a guide like this.
+    //
+    // Callers decide how much to show; the popularity sort means a truncating
+    // consumer still gets the best-known work first.
     .map((c) => ({
       tmdbId: c.id,
       title: c.title || c.name,
       mediaType: c.media_type,
       character: c.character || '',
       releaseDate: c.release_date || c.first_air_date || null,
+      // Carried through so a person can be classified before being stored:
+      // an actor whose credits are all foreign-language does not belong here.
+      originalLanguage: c.original_language || '',
       poster: tmdbImageUrl(c.poster_path, 'w500')
     }));
 

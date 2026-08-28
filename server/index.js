@@ -11,6 +11,7 @@ import {
   hydrateMoviesForBrowse,
   hydratePerson,
   searchLocal,
+  isIndianPerson,
   upsertMovieFromTmdb,
   upsertRatingsFromOmdb,
   updatePersonFts,
@@ -5003,6 +5004,11 @@ app.get('/api/search', async (req, res) => {
           if (!existing) {
             try {
               const full = await tmdbGetPersonFull(hit.tmdbId);
+              // Not an Indian-cinema person: storing them leaves a row no
+              // page can reach, since every read path finds a person through a
+              // movie. False rejects self-heal — the person is written anyway
+              // once they appear in an Indian film we ingest.
+              if (!isIndianPerson(db, full)) continue;
               const ts = nowIso();
               db.prepare(
                 `INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, tmdb_popularity, created_at, updated_at)
@@ -5145,6 +5151,8 @@ app.get('/api/search', async (req, res) => {
     const personId = makeId('tmdb-person', hit.tmdbId);
     try {
       const full = await tmdbGetPersonFull(hit.tmdbId);
+      // Same gate as the search-import path above: no Indian credits, no row.
+      if (!isIndianPerson(db, full)) continue;
       const ts = nowIso();
       db.prepare(
         `
@@ -5404,6 +5412,10 @@ app.get('/api/person/:id', async (req, res) => {
   if (!p && /^\d+$/.test(raw)) {
     try {
       const full = await tmdbGetPersonFull(Number(raw));
+      // Someone with no Indian credits is not part of this catalogue. Storing
+      // them on a speculative URL hit is how the persons table grew by 8,499 a
+      // day against 20 new movies. Fall through to the 404 below instead.
+      if (!isIndianPerson(db, full)) throw new Error('not_indian_person');
       const ts = nowIso();
       db.prepare(
         `
@@ -6136,6 +6148,38 @@ async function pruneStaleData() {
     const sessDeleted = db.prepare('DELETE FROM user_sessions WHERE expires_at < ?').run(nowIsoStr).changes;
     const resetDeleted = db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(nowIsoStr).changes;
 
+    // 6. Persons with no credits at all. Every read path reaches a person
+    //    through a movie, so one with no movie_cast rows is unreachable.
+    //
+    //    Movie writes are gated on being Indian, but person writes are not:
+    //    person enrichment stores everyone it looks up, then has their foreign
+    //    films rejected, leaving the person behind. Measured at +8,499 persons
+    //    a day against +20 movies, dragging person_search_keys up by ~104,000
+    //    rows a day — roughly 15 MB, and the bulk of the file's growth.
+    //
+    //    Gating all seven person write paths would be as leaky as gating the
+    //    movie call sites was, so sweep instead: it catches orphans whatever
+    //    creates them. person_search_keys cascades off the delete.
+    //
+    //    The 24h grace period matters — enrichment writes the person before
+    //    its cast rows, so a just-created person legitimately has no credits
+    //    for a moment. Capped per run to keep the lock short; at the observed
+    //    rate one hourly pass clears well over a day of accumulation.
+    await yield_();
+    const orphanCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const orphanIds = db.prepare(`
+      SELECT id FROM persons
+       WHERE created_at < ?
+         AND NOT EXISTS (SELECT 1 FROM movie_cast mc WHERE mc.person_id = persons.id)
+       LIMIT 20000
+    `).all(orphanCutoff).map((r) => r.id);
+    let personsDeleted = 0;
+    if (orphanIds.length) {
+      const delPerson = db.prepare('DELETE FROM persons WHERE id = ?');
+      db.transaction(() => { for (const id of orphanIds) delPerson.run(id); })();
+      personsDeleted = orphanIds.length;
+    }
+
     // 6. Orphaned app_meta song/ott attempt keys for movies that no longer exist.
     await yield_();
     const metaDeleted = db.prepare(`
@@ -6163,7 +6207,7 @@ async function pruneStaleData() {
     const freeMB = ((pageSize * freePages) / 1024 / 1024).toFixed(1);
 
     console.log(
-      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows — ` +
+      `[startup] pruned: ${cacheDeleted} cache, ${sessDeleted} sessions, ${resetDeleted} resets, ${metaDeleted} meta rows, ${personsDeleted} orphan persons — ` +
         (autoVacuum === 2
           ? `${freeMB} MB free pages (incremental vacuum active)`
           : `${freeMB} MB reclaimable (auto_vacuum off — run server/db-shrink.js once to compact and enable it)`)

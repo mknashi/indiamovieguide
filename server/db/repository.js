@@ -33,6 +33,37 @@ export function isIndianTmdbMovie(tmdbMovie) {
   return INDIAN_LANGUAGES_LOWER.includes(String(tmdbMovie.language || '').toLowerCase());
 }
 
+// Does this person belong in an Indian cinema database?
+//
+// Two signals, neither costing an extra API call:
+//   1. Any of their top credits is already a movie we hold as Indian. This is
+//      the strong one — it needs no TMDB metadata to be correct, and with
+//      ~30k Indian films stored, anyone working in Indian cinema will match.
+//   2. Failing that, any credit whose original_language is an Indian language.
+//
+// Deliberately lenient. A false accept costs one unused row; a false reject
+// self-heals, because the person is written anyway by upsertMovieFromTmdb's
+// cast handling the moment they appear in an Indian film we ingest. That
+// asymmetry is why language alone is acceptable here, even though it was not
+// good enough to classify the films themselves.
+export function isIndianPerson(db, personFull) {
+  const credits = personFull?.filmography;
+  if (!Array.isArray(credits) || !credits.length) return false;
+
+  const tmdbIds = credits.map((c) => c?.tmdbId).filter((id) => Number.isFinite(id));
+  if (tmdbIds.length) {
+    const ph = tmdbIds.map(() => '?').join(',');
+    const hit = db
+      .prepare(`SELECT 1 FROM movies WHERE tmdb_id IN (${ph}) AND COALESCE(is_indian, 1) = 1 LIMIT 1`)
+      .get(...tmdbIds);
+    if (hit) return true;
+  }
+
+  return credits.some((c) =>
+    INDIAN_LANGUAGES_LOWER.includes(String(c?.originalLanguage || '').toLowerCase())
+  );
+}
+
 export function upsertMovieFromTmdb(db, tmdbMovie, opts = {}) {
   if (!tmdbMovie) return null;
   if (!opts.allowNonIndian && !isIndianTmdbMovie(tmdbMovie)) return null;
@@ -451,7 +482,7 @@ function searchPersonsByKeys(db, q) {
        WHERE psk.key IN (${ph})
        GROUP BY p.id
        ORDER BY popularity DESC, movie_count DESC, has_image DESC, has_bio DESC
-       LIMIT 15`
+       LIMIT 200`
     )
     .all(...keysArr);
 
@@ -472,8 +503,27 @@ function searchPersonsByKeys(db, q) {
   const qn = normDice(q);
   const minDice = qn.length <= 4 ? 0.25 : qn.length <= 6 ? 0.30 : 0.35;
 
+  // Rank on how closely the name matches, then on body of work.
+  //
+  // The SQL above cannot do this ordering. Its primary key, tmdb_popularity,
+  // is written by only one of the seven person write paths and is set for 48
+  // of 187,270 rows — so it is noise that lets a nobody with popularity 0.14
+  // and no films outrank an actor with 377. Sorting here on the similarity
+  // score the filter already computes is both meaningful and always available.
+  //
+  // The query fetches 200 rather than 15 for the same reason: a common
+  // surname matches thousands of people, and truncating on a near-empty
+  // column discarded the right person before this filter ever saw them.
   return rows
-    .filter((r) => dice(qn, r.name) >= minDice)
+    .map((r) => ({ ...r, score: dice(qn, r.name) }))
+    .filter((r) => r.score >= minDice)
+    .sort((a, b) =>
+      b.score - a.score ||
+      b.movie_count - a.movie_count ||
+      b.popularity - a.popularity ||
+      b.has_image - a.has_image ||
+      b.has_bio - a.has_bio
+    )
     .slice(0, 5)
     .map((r) => r.id);
 }
@@ -518,9 +568,12 @@ export function searchLocal(db, q) {
         .map((r) => r.id)
     : [];
 
-  // When person found but no movie title match, pull their filmography.
+  // Always pull the filmography of a matched person, not only when the title
+  // search came up empty. Searching an actor's name previously returned a
+  // single film if FTS happened to match one title containing part of that
+  // name — one incidental hit was enough to suppress all 89 of their films.
   let castMovieIds = [];
-  if (!movieIds.length && personIds.length) {
+  if (personIds.length) {
     const inPh = personIds.map(() => '?').join(',');
     castMovieIds = db
       .prepare(
@@ -533,7 +586,10 @@ export function searchLocal(db, q) {
       .map((r) => r.id);
   }
 
-  const allMovieIds = movieIds.length ? movieIds : castMovieIds;
+  // Title matches first — they are the stronger signal when the query really
+  // was a title — then the matched person's films, minus anything already shown.
+  const seen = new Set(movieIds);
+  const allMovieIds = [...movieIds, ...castMovieIds.filter((id) => !seen.has(id))];
   return {
     movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
     persons: personIds.map((id) => hydratePerson(db, id)).filter(Boolean)

@@ -960,3 +960,69 @@ button.detail {
     grid-template-columns: 1fr;
   }
 }
+
+/* Filmography tail — the long list below the featured posters. Kept compact and
+   scannable so a person with 60 credits stays readable. */
+.filmography-table-wrap {
+  /* Narrow screens scroll the table itself rather than the page. */
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--panel);
+}
+
+.filmography-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  /* Below this the columns crush together, so scroll instead of wrap. */
+  min-width: 420px;
+}
+
+.filmography-table th,
+.filmography-table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.filmography-table thead th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.filmography-table tbody tr:last-child th,
+.filmography-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.filmography-table tbody tr:hover {
+  background: var(--panel-strong);
+}
+
+/* Year and role stay narrow; the title column absorbs the remaining width. */
+.filmography-table td:nth-child(2),
+.filmography-table td:nth-child(3) {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filmography-table td:first-child {
+  font-weight: 600;
+  width: 100%;
+}
+
+.filmography-table a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.filmography-table a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
