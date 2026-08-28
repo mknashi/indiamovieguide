@@ -68,6 +68,15 @@ function metaSet(db, key, value) {
 }
 
 function looksLikeQuotaExceeded(status, bodyText) {
+  // 429 is what the Data API returns for a spent daily allowance today; 403
+  // was the historical code and still appears. Only checking 403 meant every
+  // quota error was classified as transient, cached for five minutes, and
+  // retried — so an exhausted key kept being hammered all day instead of
+  // opening the circuit.
+  //
+  // A 429 is rate limiting whatever the body says, so the status alone is
+  // enough to back off.
+  if (status === 429) return true;
   if (status !== 403) return false;
   const b = String(bodyText || '').toLowerCase();
   return b.includes('exceeded') && b.includes('quota');
@@ -167,7 +176,8 @@ export async function youtubeSearchCached(db, query, opts = {}) {
           untilIso: new Date(backoffUntil).toISOString()
         });
       }
-      // Cache this failure briefly to avoid hammering the same query even if circuit closes early.
+      // Briefly, so the query is retried once quota resets rather than being
+      // remembered as empty. The circuit breaker is what prevents hammering.
       cacheSet(db, key, { items: [] }, 60 * 60 * 1000);
       return [];
     }

@@ -6128,10 +6128,15 @@ async function pruneStaleData() {
     await yield_();
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
 
-    // 2. All api_cache entries (YouTube, Wikipedia). They re-warm on next request.
-    //    Clearing all (not just expired) is the safest way to reclaim space fast.
+    // 2. Expired api_cache entries only.
+    //
+    //    This used to delete every row to reclaim disk during an emergency.
+    //    That defeated the point of the cache: YouTube search results are
+    //    cached for 7 days precisely because the Data API allows only ~100
+    //    searches a day, and wiping them hourly meant re-issuing the same
+    //    searches until the quota was gone. Respect the TTLs the callers set.
     await yield_();
-    const cacheDeleted = db.prepare('DELETE FROM api_cache').run().changes;
+    const cacheDeleted = db.prepare('DELETE FROM api_cache WHERE expires_at < ?').run(Date.now()).changes;
 
     // 3. production_countries_json is deliberately NOT nulled any more.
     //    Treating it as redundant destroyed the only record of why each movie was
