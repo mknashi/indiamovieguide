@@ -11,6 +11,7 @@ import {
   hydrateMoviesForBrowse,
   hydratePerson,
   searchLocal,
+  isIndianPerson,
   upsertMovieFromTmdb,
   upsertRatingsFromOmdb,
   updatePersonFts,
@@ -5003,6 +5004,11 @@ app.get('/api/search', async (req, res) => {
           if (!existing) {
             try {
               const full = await tmdbGetPersonFull(hit.tmdbId);
+              // Not an Indian-cinema person: storing them leaves a row no
+              // page can reach, since every read path finds a person through a
+              // movie. False rejects self-heal — the person is written anyway
+              // once they appear in an Indian film we ingest.
+              if (!isIndianPerson(db, full)) continue;
               const ts = nowIso();
               db.prepare(
                 `INSERT INTO persons (id, tmdb_id, name, name_soundex, first_name_soundex, biography, wiki_url, profile_image, tmdb_popularity, created_at, updated_at)
@@ -5145,6 +5151,8 @@ app.get('/api/search', async (req, res) => {
     const personId = makeId('tmdb-person', hit.tmdbId);
     try {
       const full = await tmdbGetPersonFull(hit.tmdbId);
+      // Same gate as the search-import path above: no Indian credits, no row.
+      if (!isIndianPerson(db, full)) continue;
       const ts = nowIso();
       db.prepare(
         `
@@ -5404,6 +5412,10 @@ app.get('/api/person/:id', async (req, res) => {
   if (!p && /^\d+$/.test(raw)) {
     try {
       const full = await tmdbGetPersonFull(Number(raw));
+      // Someone with no Indian credits is not part of this catalogue. Storing
+      // them on a speculative URL hit is how the persons table grew by 8,499 a
+      // day against 20 new movies. Fall through to the 404 below instead.
+      if (!isIndianPerson(db, full)) throw new Error('not_indian_person');
       const ts = nowIso();
       db.prepare(
         `

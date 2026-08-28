@@ -272,6 +272,9 @@ export async function tmdbGetPersonFull(tmdbId) {
       mediaType: c.media_type,
       character: c.character || '',
       releaseDate: c.release_date || c.first_air_date || null,
+      // Carried through so a person can be classified before being stored:
+      // an actor whose credits are all foreign-language does not belong here.
+      originalLanguage: c.original_language || '',
       poster: tmdbImageUrl(c.poster_path, 'w500')
     }));
 

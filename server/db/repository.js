@@ -33,6 +33,37 @@ export function isIndianTmdbMovie(tmdbMovie) {
   return INDIAN_LANGUAGES_LOWER.includes(String(tmdbMovie.language || '').toLowerCase());
 }
 
+// Does this person belong in an Indian cinema database?
+//
+// Two signals, neither costing an extra API call:
+//   1. Any of their top credits is already a movie we hold as Indian. This is
+//      the strong one — it needs no TMDB metadata to be correct, and with
+//      ~30k Indian films stored, anyone working in Indian cinema will match.
+//   2. Failing that, any credit whose original_language is an Indian language.
+//
+// Deliberately lenient. A false accept costs one unused row; a false reject
+// self-heals, because the person is written anyway by upsertMovieFromTmdb's
+// cast handling the moment they appear in an Indian film we ingest. That
+// asymmetry is why language alone is acceptable here, even though it was not
+// good enough to classify the films themselves.
+export function isIndianPerson(db, personFull) {
+  const credits = personFull?.filmography;
+  if (!Array.isArray(credits) || !credits.length) return false;
+
+  const tmdbIds = credits.map((c) => c?.tmdbId).filter((id) => Number.isFinite(id));
+  if (tmdbIds.length) {
+    const ph = tmdbIds.map(() => '?').join(',');
+    const hit = db
+      .prepare(`SELECT 1 FROM movies WHERE tmdb_id IN (${ph}) AND COALESCE(is_indian, 1) = 1 LIMIT 1`)
+      .get(...tmdbIds);
+    if (hit) return true;
+  }
+
+  return credits.some((c) =>
+    INDIAN_LANGUAGES_LOWER.includes(String(c?.originalLanguage || '').toLowerCase())
+  );
+}
+
 export function upsertMovieFromTmdb(db, tmdbMovie, opts = {}) {
   if (!tmdbMovie) return null;
   if (!opts.allowNonIndian && !isIndianTmdbMovie(tmdbMovie)) return null;
