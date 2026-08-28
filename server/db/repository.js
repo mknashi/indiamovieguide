@@ -574,16 +574,37 @@ export function searchLocal(db, q) {
   // name — one incidental hit was enough to suppress all 89 of their films.
   let castMovieIds = [];
   if (personIds.length) {
-    const inPh = personIds.map(() => '?').join(',');
-    castMovieIds = db
-      .prepare(
-        `SELECT DISTINCT m.id FROM movies m
+    // Walk the matched people in relevance order and take each one's films
+    // best-known first.
+    //
+    // Two things were wrong with doing this as a single query. Ordering by
+    // release_date surfaced an actor's most recent credits — cameos,
+    // documentaries, unreleased entries — instead of the work they are known
+    // for. And pooling every matched person let a weak match swamp the
+    // results: a search for one actor also pulled in the filmographies of two
+    // similarly-named people, one of whom had 235 films.
+    //
+    // TMDB vote count is the popularity signal available locally; films
+    // without a rating row sort last rather than dropping out.
+    const perPerson = db.prepare(
+      `SELECT m.id, COALESCE(r.count, 0) AS votes
+         FROM movies m
          JOIN movie_cast mc ON mc.movie_id = m.id
-         WHERE COALESCE(m.is_indian, 1) = 1 AND mc.person_id IN (${inPh})
-         ORDER BY COALESCE(m.release_date, '0000-00-00') DESC LIMIT 50`
-      )
-      .all(...personIds)
-      .map((r) => r.id);
+         LEFT JOIN ratings r ON r.movie_id = m.id AND r.source = 'tmdb'
+        WHERE COALESCE(m.is_indian, 1) = 1 AND mc.person_id = ?
+        ORDER BY votes DESC, COALESCE(m.release_date, '0000-00-00') DESC
+        LIMIT 50`
+    );
+    const seenCast = new Set();
+    for (const pid of personIds) {
+      for (const row of perPerson.all(pid)) {
+        if (seenCast.has(row.id)) continue;
+        seenCast.add(row.id);
+        castMovieIds.push(row.id);
+      }
+      if (castMovieIds.length >= 50) break;
+    }
+    castMovieIds = castMovieIds.slice(0, 50);
   }
 
   // Title matches first — they are the stronger signal when the query really
