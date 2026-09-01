@@ -1,0 +1,17 @@
+# Replicates the live SQLite database to S3-compatible object storage.
+# Backblaze B2 and Cloudflare R2 both work here and cost cents a month;
+# set `endpoint` to whichever you use.
+dbs:
+  - path: /data/indiamovieguide.sqlite
+    replicas:
+      - type: s3
+        bucket: $S3_BUCKET
+        path: indiamovieguide
+        endpoint: $S3_ENDPOINT
+        region: $S3_REGION
+        # Keep a day of granular history, then rely on snapshots.
+        retention: 24h
+        snapshot-interval: 6h
+        # How long a restore may have to replay. Lower = faster recovery,
+        # more objects written.
+        validation-interval: 12h

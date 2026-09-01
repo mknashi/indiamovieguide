@@ -5,7 +5,13 @@ dist
 *.log
 .env
 .env.*
+!.env.example
 env
 *.swp
 public/data
 tsconfig.tsbuildinfo
+
+# SQLite database + WAL sidecars: never commit these, they reach multi-GB
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
