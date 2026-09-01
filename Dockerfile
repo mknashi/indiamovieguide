@@ -13,6 +13,16 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# Vite inlines import.meta.env.* at build time, so these must be present now --
+# supplying them at runtime leaves analytics dead and the captcha widget
+# rendering "Captcha not configured". Both are public values (a GA measurement
+# id and a reCAPTCHA *site* key), so baking them into the bundle is expected.
+ARG VITE_GA_MEASUREMENT_ID=""
+ARG VITE_RECAPTCHA_SITEKEY=""
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID \
+    VITE_RECAPTCHA_SITEKEY=$VITE_RECAPTCHA_SITEKEY
+
 RUN npm run build
 
 # Drop dev dependencies but keep the compiled better-sqlite3 binary that
