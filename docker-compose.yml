@@ -14,37 +14,18 @@ services:
         VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
         VITE_RECAPTCHA_SITEKEY: ${VITE_RECAPTCHA_SITEKEY:-}
     restart: unless-stopped
+    # Everything from Dokploy's Environment tab reaches the container, so the
+    # ~48 vars server/index.js reads need no enumeration here. Anything left
+    # unset stays genuinely unset and falls back to its code default.
+    env_file:
+      - path: .env
+        required: false
+    # These override env_file, which matters: DB_PATH copied from Render points
+    # at /var/data/indiamovieguide-v2.sqlite, a path that does not exist here.
     environment:
       NODE_ENV: production
       PORT: 8787
-      # Must live on the volume below, not in the container's writable layer.
       DB_PATH: /data/indiamovieguide.sqlite
-      SITE_URL: ${SITE_URL}
-      TMDB_API_KEY: ${TMDB_API_KEY}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      TMDB_BEARER_TOKEN: ${TMDB_BEARER_TOKEN:-}
-      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
-      OMDB_API_KEY: ${OMDB_API_KEY:-}
-      MOTN_API_KEY: ${MOTN_API_KEY:-}
-      COOKIE_SECURE: ${COOKIE_SECURE:-1}
-      # Auth / captcha
-      RECAPTCHA_SECRET: ${RECAPTCHA_SECRET:-}
-      CAPTCHA_BYPASS: ${CAPTCHA_BYPASS:-}
-      # Movie of the Night (OTT deeplinks)
-      MOTN_COUNTRY: ${MOTN_COUNTRY:-}
-      MOTN_DAILY_BUDGET: ${MOTN_DAILY_BUDGET:-}
-      MOTN_ATTEMPT_MINUTES: ${MOTN_ATTEMPT_MINUTES:-}
-      MOTN_PAUSE_MINUTES: ${MOTN_PAUSE_MINUTES:-}
-      MOTN_DEEPLINK_TTL_HOURS: ${MOTN_DEEPLINK_TTL_HOURS:-}
-      # YouTube song lookups
-      YOUTUBE_PER_TRACK_LOOKUPS: ${YOUTUBE_PER_TRACK_LOOKUPS:-}
-      YOUTUBE_QUOTA_BACKOFF_MINUTES: ${YOUTUBE_QUOTA_BACKOFF_MINUTES:-}
-      YOUTUBE_SONG_QUERY_LIMIT: ${YOUTUBE_SONG_QUERY_LIMIT:-}
-      # Caching / sitemap / seeding
-      HTML_CACHE_TTL_MINUTES: ${HTML_CACHE_TTL_MINUTES:-}
-      SITEMAP_MAX_URLS: ${SITEMAP_MAX_URLS:-}
-      SEED_TITLES: ${SEED_TITLES:-}
-      DEBUG_SONGS: ${DEBUG_SONGS:-}
     volumes:
       - sqlite-data:/data
     healthcheck:
