@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+.cache
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+docs
+.claude
+README.md
