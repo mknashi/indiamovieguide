@@ -36,7 +36,11 @@ ENV NODE_ENV=production PORT=8787
 
 # The image ships a `node` user; running as root would leave the SQLite file
 # on the volume owned by root and awkward to back up.
-RUN mkdir -p /data && chown -R node:node /data
+#
+# .cache is created under cwd at listen time (server/index.js) for
+# agent-last-run.json, so it has to exist and be writable by `node` before the
+# process starts -- otherwise the server binds the port and then dies EACCES.
+RUN mkdir -p /data /app/.cache && chown -R node:node /data /app/.cache
 
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/dist ./dist

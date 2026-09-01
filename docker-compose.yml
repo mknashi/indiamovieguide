@@ -28,6 +28,9 @@ services:
       DB_PATH: /data/indiamovieguide.sqlite
     volumes:
       - sqlite-data:/data
+      # Keeps agent-last-run.json across redeploys; without the mount it lives
+      # in the image layer and resets every deploy.
+      - app-cache:/app/.cache
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -68,6 +71,7 @@ services:
 
 volumes:
   sqlite-data:
+  app-cache:
 
 # Created by the Dokploy installer; Traefik routes to containers on it.
 networks:
