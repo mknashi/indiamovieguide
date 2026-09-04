@@ -613,7 +613,13 @@ export function searchLocal(db, q) {
   const allMovieIds = [...movieIds, ...castMovieIds.filter((id) => !seen.has(id))];
   return {
     movies: allMovieIds.map((id) => hydrateMovie(db, id)).filter(Boolean),
-    persons: personIds.map((id) => hydratePerson(db, id)).filter(Boolean)
+    persons: personIds.map((id) => hydratePerson(db, id)).filter(Boolean),
+    // How many of `movies` came from the title index rather than a matched
+    // person's filmography. Callers use this to tell a real title hit from an
+    // incidental one: searching a title that merely shares a token with some
+    // actor's name pulls in that actor's films, which look like results but
+    // answer a different question.
+    titleMatchCount: movieIds.length
   };
 }
 
