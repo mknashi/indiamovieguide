@@ -3079,23 +3079,40 @@ async function seedHomeFromProviders({ force = false } = {}) {
     // Two curated shelves: "New" (last 45 days) and "Upcoming" (next 180 days) for region IN.
     const languages = defaultIndianLanguageCodes();
     const pages = Math.max(1, Math.min(5, Number(process.env.HOME_SEED_PAGES || 0) || 2));
-    const maxIds = Math.max(40, Math.min(180, Number(process.env.HOME_SEED_MAX_IDS || 0) || 80));
+    // Raised from 80: the id list is now spread across every (shelf, language)
+    // bucket instead of being taken from the head of one flat list, so the cap has
+    // more buckets to cover — 14 of them at 7 languages x 2 shelves.
+    const maxIds = Math.max(40, Math.min(180, Number(process.env.HOME_SEED_MAX_IDS || 0) || 140));
     const concurrency = Math.max(1, Math.min(8, Number(process.env.HOME_SEED_CONCURRENCY || 0) || 4));
 
     const newTasks = [];
     const upcomingTasks = [];
+    // The "New" shelf is discovered under two sort orders. popularity.desc finds the
+    // hits; primary_release_date.desc finds titles that are genuinely new but not yet
+    // popular. TMDB popularity lags release by weeks, so sorting only by popularity
+    // means a slow-burn film is never ranked high enough while it is still inside the
+    // 45-day window, and has aged out by the time it is. Hanuman Ansh sat at
+    // popularity 0.40 through its window (rank 25 of 47 Hindi titles, i.e. page 2)
+    // and only reached 13+ three weeks after the window closed.
+    // Kept as two separate result sets, not concatenated: the selection below walks
+    // each bucket breadth-first and only ever reaches a shallow depth, so appending
+    // the recency results behind the popularity ones would bury them out of reach.
+    const newSorts = ['popularity.desc', 'primary_release_date.desc'];
+    newSorts.forEach(() => newTasks.push([]));
     for (let p = 1; p <= pages; p++) {
-      newTasks.push(
-        tmdbDiscoverMovies({
-          dateGte: past45,
-          dateLte: today,
-          sortBy: 'popularity.desc',
-          page: p,
-          region: 'IN',
-          languages,
-          voteCountGte: 0
-        }).catch(() => [])
-      );
+      newSorts.forEach((sortBy, sortIdx) => {
+        newTasks[sortIdx].push(
+          tmdbDiscoverMovies({
+            dateGte: past45,
+            dateLte: today,
+            sortBy,
+            page: p,
+            region: 'IN',
+            languages,
+            voteCountGte: 0
+          }).catch(() => [])
+        );
+      });
       upcomingTasks.push(
         tmdbDiscoverMovies({
           dateGte: today,
@@ -3109,11 +3126,49 @@ async function seedHomeFromProviders({ force = false } = {}) {
       );
     }
 
-    const [newPages, upcomingPages] = await Promise.all([Promise.all(newTasks), Promise.all(upcomingTasks)]);
-    const newHits = newPages.flat();
+    const [newBySort, upcomingPages] = await Promise.all([
+      Promise.all(newTasks.map((tasks) => Promise.all(tasks).then((pages) => pages.flat()))),
+      Promise.all(upcomingTasks)
+    ]);
     const upcomingHits = upcomingPages.flat();
 
-    const uniqueIds = Array.from(new Set([...newHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, maxIds);
+    // Spread the cap across every (shelf, language) bucket instead of taking the head
+    // of one flattened list.
+    //
+    // The flat slice discarded far more than it looked like it did. Discover results
+    // arrive grouped page-major then language-major — page 1 of hi, kn, te, ta, ml,
+    // mr, bn, then page 2 of each — and `with_original_language` partitions the
+    // result sets, so dedup removed nothing. The first 80 ids were therefore exactly
+    // page 1 of the first four languages: every page 2 was fetched and thrown away,
+    // Malayalam, Marathi and Bengali got nothing, and the Upcoming hits — appended
+    // after ~280 New hits — never entered the list at all, so the Upcoming shelf was
+    // never seeded here.
+    const bucketByLanguage = (hits) => {
+      const byLang = new Map();
+      for (const h of hits) {
+        const key = h.originalLanguage || '_';
+        if (!byLang.has(key)) byLang.set(key, []);
+        byLang.get(key).push(h.tmdbId);
+      }
+      return [...byLang.values()];
+    };
+    const queues = [...newBySort.flatMap((hits) => bucketByLanguage(hits)), ...bucketByLanguage(upcomingHits)];
+
+    const uniqueIds = [];
+    const seenTmdbIds = new Set();
+    for (let depth = 0; uniqueIds.length < maxIds; depth++) {
+      let advanced = false;
+      for (const queue of queues) {
+        if (depth >= queue.length) continue;
+        advanced = true;
+        const tmdbId = queue[depth];
+        if (seenTmdbIds.has(tmdbId)) continue;
+        seenTmdbIds.add(tmdbId);
+        uniqueIds.push(tmdbId);
+        if (uniqueIds.length >= maxIds) break;
+      }
+      if (!advanced) break; // every queue exhausted
+    }
 
     // Concurrency-limited upsert (TMDB movie full fetch is the expensive part).
     const q = uniqueIds.slice();
@@ -4967,7 +5022,26 @@ app.get('/api/search', async (req, res) => {
     )
     .get(...local.persons.map((p) => p.id));
 
-  if (local.movies.length || localPersonsHaveIndianMovies) {
+  // A local hit only short-circuits the provider path when it actually answers the
+  // query. Two things count: a title match, or a person whose name covers every
+  // token of the query.
+  //
+  // `local.movies.length` alone was too weak. Searching "Hanuman Ansh" matched the
+  // people "Hanuman", "Hanuman Soni", "Hanumanthu"…, pulled their filmographies in as
+  // 12 unrelated movies, and returned those — so TMDB, where the film was the single
+  // exact match, was never consulted and the title could not be imported. Any new
+  // release whose title shares a token with an existing person's name was invisible
+  // until batch ingestion happened to catch it.
+  const normForMatch = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const queryTokens = normForMatch(q).split(' ').filter(Boolean);
+  const personCoversQuery =
+    queryTokens.length > 0 &&
+    local.persons.some((p) => {
+      const nameTokens = new Set(normForMatch(p.name).split(' ').filter(Boolean));
+      return queryTokens.every((t) => nameTokens.has(t));
+    });
+
+  if (local.titleMatchCount > 0 || (localPersonsHaveIndianMovies && personCoversQuery)) {
     // Enrich top results in the background — don't block the response.
     setImmediate(async () => {
       for (const m of local.movies.slice(0, 3)) {
