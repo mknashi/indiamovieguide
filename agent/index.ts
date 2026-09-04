@@ -232,16 +232,39 @@ async function main() {
   const future = iso(daysFuture);
 
   // Pull "New" and "Upcoming" candidates from TMDB, then upsert the full record into SQLite.
-  const [newHits, upcomingHits] = await Promise.all([
-    tmdbDiscoverMovies({
-      dateGte: past,
-      dateLte: today,
-      sortBy: 'popularity.desc',
-      page: 1,
-      region: 'IN',
-      languages: tmdbLangs,
-      voteCountGte: 0
-    }).catch(() => []),
+  //
+  // Two pages and two sort orders for "New". Page 1 of popularity.desc alone cannot
+  // see a recent release that has not become popular yet: TMDB popularity lags
+  // release by weeks, so a slow-burn title ranks below the fold for exactly as long
+  // as it is still inside the date window. primary_release_date.desc surfaces it on
+  // recency instead, which is the property the window is actually selecting on.
+  const [newPopular, newRecent, upcomingHits] = await Promise.all([
+    Promise.all(
+      [1, 2].map((page) =>
+        tmdbDiscoverMovies({
+          dateGte: past,
+          dateLte: today,
+          sortBy: 'popularity.desc',
+          page,
+          region: 'IN',
+          languages: tmdbLangs,
+          voteCountGte: 0
+        }).catch(() => [])
+      )
+    ).then((pages) => pages.flat()),
+    Promise.all(
+      [1, 2].map((page) =>
+        tmdbDiscoverMovies({
+          dateGte: past,
+          dateLte: today,
+          sortBy: 'primary_release_date.desc',
+          page,
+          region: 'IN',
+          languages: tmdbLangs,
+          voteCountGte: 0
+        }).catch(() => [])
+      )
+    ).then((pages) => pages.flat()),
     tmdbDiscoverMovies({
       dateGte: today,
       dateLte: future,
@@ -253,7 +276,35 @@ async function main() {
     }).catch(() => [])
   ]);
 
-  const ids = Array.from(new Set([...newHits, ...upcomingHits].map((h) => h.tmdbId))).slice(0, limit);
+  // Interleave per language so `limit` is not spent entirely on the first few
+  // languages — the discover results arrive grouped by language, and a plain slice
+  // over the concatenation drops the later ones wholesale.
+  const byLanguage = (hits) => {
+    const groups = new Map();
+    for (const h of hits) {
+      const key = h.originalLanguage || '_';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(h.tmdbId);
+    }
+    return [...groups.values()];
+  };
+  const queues = [...byLanguage(newPopular), ...byLanguage(newRecent), ...byLanguage(upcomingHits)];
+
+  const ids = [];
+  const seenIds = new Set();
+  for (let depth = 0; ids.length < limit; depth++) {
+    let advanced = false;
+    for (const queue of queues) {
+      if (depth >= queue.length) continue;
+      advanced = true;
+      const tmdbId = queue[depth];
+      if (seenIds.has(tmdbId)) continue;
+      seenIds.add(tmdbId);
+      ids.push(tmdbId);
+      if (ids.length >= limit) break;
+    }
+    if (!advanced) break;
+  }
   stats.discovered = ids.length;
 
   for (let i = 0; i < ids.length; i++) {
