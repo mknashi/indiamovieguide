@@ -1,4 +1,5 @@
-import { RiArrowLeftLine, RiExternalLinkLine, RiMailLine } from 'react-icons/ri';
+import { RiArrowLeftLine } from 'react-icons/ri';
+import { MessageForm } from '../components/MessageForm';
 import { linkHandler, navigate } from '../router';
 
 const FAQ = [
@@ -12,7 +13,7 @@ const FAQ = [
   },
   {
     q: 'How do I report incorrect or missing movie information?',
-    a: 'Email us at the address below with the movie title, what information is wrong, and the correct details. For cast errors, a link to the TMDB or Wikipedia page for the title helps speed up the fix. We aim to review corrections within a few business days.',
+    a: 'Use the form above with the movie title, what information is wrong, and the correct details. For cast errors, a link to the TMDB or Wikipedia page for the title helps speed up the fix. We aim to review corrections within a few business days.',
   },
   {
     q: 'Can I add a movie that is not in the catalog?',
@@ -32,7 +33,7 @@ const FAQ = [
   },
   {
     q: 'Do you accept advertising or partnership requests?',
-    a: 'We are open to relevant advertising partnerships, editorial collaborations, and data licensing discussions. Email us with a brief description of the partnership you have in mind and we will respond as soon as possible.',
+    a: 'We are open to relevant advertising partnerships, editorial collaborations, and data licensing discussions. Send us a message with a brief description of the partnership you have in mind and we will respond as soon as possible.',
   },
   {
     q: 'Is IndiaMovieGuide affiliated with any streaming service or studio?',
@@ -40,12 +41,11 @@ const FAQ = [
   },
   {
     q: 'How do I delete my account or request removal of my data?',
-    a: 'Email us from the address associated with your account. We will delete your account and all associated data — favorites, watchlists, and any submitted reviews — within 7 business days and confirm by email once done.',
+    a: 'Send us a message using the email address on your account. We will delete your account and all associated data — favorites, watchlists, and any submitted reviews — within 7 business days and confirm by email once done.',
   },
 ];
 
 export function ContactPage() {
-  const email = 'contact@indiamovieguide.com';
   return (
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
@@ -62,17 +62,14 @@ export function ContactPage() {
           Have a question, found an error, want to suggest a missing film, or interested in
           partnering with us? We read every message and do our best to respond promptly.
         </div>
-        <div className="meta" style={{ marginTop: 12 }}>
-          <a
-            className="chip"
-            href={`mailto:${email}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <RiMailLine size={14} />
-            {email}
-            <RiExternalLinkLine size={14} />
-          </a>
-        </div>
+        <MessageForm
+          id="contact-message"
+          siteId="indiamovieguide-contact"
+          messagePlaceholder="How can we help?"
+          submitLabel="Send Message"
+          successText="Thanks! We've received your message and will get back to you."
+          emailRequired
+        />
         <div className="tagline" style={{ marginTop: 10, lineHeight: 1.7 }}>
           You can also use the{' '}
           <a href="/feedback" onClick={linkHandler('/feedback')} style={{ textDecoration: 'underline' }}>
@@ -100,8 +97,15 @@ export function ContactPage() {
       <div className="detail" style={{ marginTop: 16 }}>
         <div className="tagline" style={{ lineHeight: 1.7 }}>
           Can't find an answer above?{' '}
-          <a href={`mailto:${email}`} style={{ textDecoration: 'underline' }}>
-            Email us directly
+          <a
+            href="#contact-message"
+            onClick={(e) => {
+              e.preventDefault();
+              document.getElementById('contact-message')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }}
+            style={{ textDecoration: 'underline' }}
+          >
+            Send us a message
           </a>{' '}
           and we'll get back to you.
         </div>

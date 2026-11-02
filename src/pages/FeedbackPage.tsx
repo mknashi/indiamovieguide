@@ -1,9 +1,8 @@
-import { RiArrowLeftLine, RiExternalLinkLine, RiMailLine } from 'react-icons/ri';
+import { RiArrowLeftLine } from 'react-icons/ri';
+import { MessageForm } from '../components/MessageForm';
 import { navigate } from '../router';
 
 export function FeedbackPage() {
-  const email = 'feedback@indiamovieguide.com';
-  const subject = encodeURIComponent('IndiaMovieGuide feedback');
   return (
     <div>
       <div className="section-header" style={{ marginTop: 10 }}>
@@ -22,9 +21,8 @@ export function FeedbackPage() {
           message is read personally.
         </div>
         <div className="tagline" style={{ lineHeight: 1.8, marginTop: 8 }}>
-          The fastest way to reach us is by email. Please include as much context as possible —
-          movie title, language, and a brief description of the issue — so we can address it
-          quickly.
+          Use the form below, and please include as much context as possible — movie title,
+          language, and a brief description of the issue — so we can address it quickly.
         </div>
       </div>
 
@@ -48,17 +46,12 @@ export function FeedbackPage() {
 
       <div className="detail" style={{ marginTop: 14 }}>
         <h4>Send feedback</h4>
-        <div className="meta" style={{ marginTop: 10 }}>
-          <a
-            className="chip"
-            href={`mailto:${email}?subject=${subject}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <RiMailLine size={14} />
-            {email}
-            <RiExternalLinkLine size={14} />
-          </a>
-        </div>
+        <MessageForm
+          siteId="indiamovieguide-feedback"
+          messagePlaceholder="What should we fix, add or improve?"
+          submitLabel="Send Feedback"
+          successText="Thanks for your feedback! Every message is read personally."
+        />
         <div className="tagline" style={{ marginTop: 10, lineHeight: 1.7 }}>
           For missing movies, you can also use the{' '}
           <a href="/submit" onClick={(e) => { e.preventDefault(); navigate('/submit'); }} style={{ textDecoration: 'underline' }}>
